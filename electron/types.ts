@@ -29,6 +29,24 @@ export interface QuotaUpdatePayload {
   error?: string;
 }
 
+export interface UpdateDownloadProgress {
+  receivedBytes: number;
+  totalBytes: number | null;
+  percent: number | null;
+}
+
+export interface UpdateStatus {
+  currentVersion: string;
+  latestVersion: string | null;
+  releaseUrl: string;
+  updateAvailable: boolean;
+  checking: boolean;
+  downloading: boolean;
+  downloadProgress: number | null;
+  lastCheckedAt: number | null;
+  error: string | null;
+}
+
 export interface PollingSettings {
   activityCheckSeconds: number;
   busyQuotaSeconds: number;

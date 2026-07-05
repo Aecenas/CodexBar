@@ -27,7 +27,11 @@ Minimum values:
 
 ## Tray Shell
 
-The Electron window uses `skipTaskbar: true`, so it does not appear as a normal taskbar app. A persistent `Tray` instance owns the system tray entry. The context menu intentionally contains only `退出软件`.
+The Electron window uses `skipTaskbar: true`, so it does not appear as a normal taskbar app. A persistent `Tray` instance owns the system tray entry. The context menu contains `开机启动` / `开机启动√` and `退出软件`. Startup is handled through Electron's `setLoginItemSettings`.
+
+## Update Checks
+
+The Electron main process checks `https://api.github.com/repos/Aecenas/CodexBar/releases/latest` when automatic update checks are enabled. The renderer stores the last result in local storage and checks at most once every 24 hours. When the user clicks `升级`, the app compares versions first. If a newer release exists, the main process downloads the Windows installer asset from GitHub Releases into the app user-data updates directory, reports progress to the renderer, and launches the installer after download.
 
 ## Packaging
 

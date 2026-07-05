@@ -1,10 +1,11 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, Tray } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
 import path from "node:path";
 import { CodexActivityDetector } from "./codexActivityDetector.js";
 import { CodexAppServerClient } from "./codexAppServerClient.js";
 import { DEFAULT_POLLING_SETTINGS, normalizePollingSettings } from "./pollingSettings.js";
 import { RefreshScheduler } from "./refreshScheduler.js";
 import type { VisualSize } from "./types.js";
+import { checkForUpdate, downloadAndInstallUpdate } from "./updateService.js";
 
 let mainWindow: BrowserWindow | null = null;
 let scheduler: RefreshScheduler | null = null;
@@ -26,7 +27,7 @@ const windowSizes: Record<
   large: { width: 768, collapsedHeight: 89, panelTop: 97, panelScale: 1.14 }
 };
 
-const settingsPanelHeight = 270;
+const settingsPanelHeight = 350;
 const expandedWindowPadding = 32;
 
 let currentVisualSize: VisualSize = "medium";
@@ -113,6 +114,15 @@ app.whenReady().then(() => {
   ipcMain.handle("polling:set-settings", (_event, settings: unknown) =>
     scheduler?.updatePollingSettings(normalizePollingSettings(settings ?? {})) ?? DEFAULT_POLLING_SETTINGS
   );
+  ipcMain.handle("updates:check", () => checkForUpdate());
+  ipcMain.handle("updates:download-and-install", (event) => downloadAndInstallUpdate(event.sender));
+  ipcMain.on("app:open-external", (_event, url: unknown) => {
+    if (typeof url !== "string" || !url.startsWith("https://github.com/Aecenas/CodexBar/releases")) {
+      return;
+    }
+
+    void shell.openExternal(url);
+  });
 
   createTray();
   createWindow();
@@ -172,14 +182,50 @@ function createTray(): void {
 
   tray = new Tray(trayIcon);
   tray.setToolTip("CodexBar");
+  updateTrayMenu();
+}
+
+function updateTrayMenu(): void {
+  if (!tray) {
+    return;
+  }
+
+  const openAtLogin = getOpenAtLogin();
   tray.setContextMenu(
     Menu.buildFromTemplate([
+      {
+        label: openAtLogin ? "开机启动√" : "开机启动",
+        click: () => {
+          setOpenAtLogin(!openAtLogin);
+          updateTrayMenu();
+        }
+      },
       {
         label: "退出软件",
         click: () => app.quit()
       }
     ])
   );
+}
+
+function getOpenAtLogin(): boolean {
+  return app.getLoginItemSettings(getLoginItemOptions(false)).openAtLogin;
+}
+
+function setOpenAtLogin(openAtLogin: boolean): void {
+  app.setLoginItemSettings(getLoginItemOptions(openAtLogin));
+}
+
+function getLoginItemOptions(openAtLogin: boolean): Electron.Settings {
+  if (process.defaultApp) {
+    return {
+      openAtLogin,
+      path: process.execPath,
+      args: [app.getAppPath()]
+    };
+  }
+
+  return { openAtLogin };
 }
 
 function getAssetPath(fileName: string): string {

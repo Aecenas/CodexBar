@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, QuotaHistoryPoint, QuotaUpdatePayload } from "../types";
+import type { AppSettings, QuotaHistoryPoint, QuotaUpdatePayload, UpdateStatus } from "../types";
 import boltOverlay from "../assets/bolt-overlay.png";
 import { MetricGroup } from "./MetricGroup";
 import { QuotaHoverPanel } from "./QuotaHoverPanel";
@@ -9,12 +9,21 @@ interface CodexBarProps {
   quota: QuotaUpdatePayload;
   history: QuotaHistoryPoint[];
   appSettings: AppSettings;
+  updateStatus: UpdateStatus;
   onAppSettingsChange: (settings: AppSettings) => void;
+  onUpgrade: () => Promise<UpdateStatus>;
 }
 
 type ActivePanel = "fiveHour" | "week" | "settings" | null;
 
-export function CodexBar({ quota, history, appSettings, onAppSettingsChange }: CodexBarProps) {
+export function CodexBar({
+  quota,
+  history,
+  appSettings,
+  updateStatus,
+  onAppSettingsChange,
+  onUpgrade
+}: CodexBarProps) {
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
   const [autoRevealed, setAutoRevealed] = useState(() => !appSettings.autoCollapse);
   const hideTimer = useRef<number | null>(null);
@@ -144,6 +153,7 @@ export function CodexBar({ quota, history, appSettings, onAppSettingsChange }: C
           alt=""
           draggable={false}
         />
+        {updateStatus.updateAvailable ? <span className="codex-update-dot" aria-hidden="true" /> : null}
         <div
           className="metric-hover-zone metric-hover-codex"
           onPointerEnter={() => showPanel("settings")}
@@ -191,7 +201,9 @@ export function CodexBar({ quota, history, appSettings, onAppSettingsChange }: C
       {activePanel === "settings" ? (
         <SettingsHoverPanel
           settings={appSettings}
+          updateStatus={updateStatus}
           onChange={handleAppSettingsChange}
+          onUpgrade={onUpgrade}
           onPointerEnter={keepPanelOpen}
           onPointerLeave={scheduleHidePanel}
         />

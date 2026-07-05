@@ -15,7 +15,8 @@ export const MIN_POLLING_SETTINGS: PollingSettings = {
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   ...DEFAULT_POLLING_SETTINGS,
   visualSize: "medium",
-  autoCollapse: false
+  autoCollapse: false,
+  autoUpdateCheck: true
 };
 
 export function normalizePollingSettings(settings: Partial<PollingSettings>): PollingSettings {
@@ -48,7 +49,8 @@ export function normalizeAppSettings(settings: Partial<AppSettings>): AppSetting
   return {
     ...polling,
     visualSize,
-    autoCollapse: settings.autoCollapse === true
+    autoCollapse: settings.autoCollapse === true,
+    autoUpdateCheck: settings.autoUpdateCheck !== false
   };
 }
 

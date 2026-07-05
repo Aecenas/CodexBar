@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AppSettings, VisualSize } from "../types";
+import type { AppSettings, UpdateStatus, VisualSize } from "../types";
 import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_POLLING_SETTINGS,
@@ -9,7 +9,9 @@ import {
 
 interface SettingsHoverPanelProps {
   settings: AppSettings;
+  updateStatus: UpdateStatus;
   onChange: (settings: AppSettings) => void;
+  onUpgrade: () => Promise<UpdateStatus>;
   onPointerEnter: () => void;
   onPointerLeave: () => void;
 }
@@ -54,17 +56,29 @@ const VISUAL_SIZE_OPTIONS: Array<{ value: VisualSize; label: string }> = [
 
 export function SettingsHoverPanel({
   settings,
+  updateStatus,
   onChange,
+  onUpgrade,
   onPointerEnter,
   onPointerLeave
 }: SettingsHoverPanelProps) {
   const [draftValues, setDraftValues] = useState<Record<IntervalSettingKey, string>>(() =>
     createDraftValues(settings)
   );
+  const [upgradeHint, setUpgradeHint] = useState<string | null>(null);
 
   useEffect(() => {
     setDraftValues(createDraftValues(settings));
   }, [settings.activityCheckSeconds, settings.busyQuotaSeconds, settings.idleQuotaSeconds]);
+
+  useEffect(() => {
+    if (upgradeHint === null) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => setUpgradeHint(null), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [upgradeHint]);
 
   function updateDraftValue(key: IntervalSettingKey, value: string): void {
     if (!/^\d*$/.test(value)) {
@@ -103,6 +117,25 @@ export function SettingsHoverPanel({
 
   function updateAutoCollapse(autoCollapse: boolean): void {
     onChange(normalizeAppSettings({ ...settings, autoCollapse }));
+  }
+
+  function updateAutoUpdateCheck(autoUpdateCheck: boolean): void {
+    onChange(normalizeAppSettings({ ...settings, autoUpdateCheck }));
+  }
+
+  async function handleUpgradeClick(): Promise<void> {
+    const next = await onUpgrade();
+
+    if (next.error) {
+      setUpgradeHint("升级失败");
+      return;
+    }
+
+    if (next.downloading || next.updateAvailable) {
+      return;
+    }
+
+    setUpgradeHint("已是最新");
   }
 
   return (
@@ -201,6 +234,40 @@ export function SettingsHoverPanel({
           />
         </label>
       </div>
+      <div className="settings-separator settings-update-separator" />
+      <div className="settings-update-row">
+        <span className="settings-update-copy">
+          <span className="settings-row-title">
+            <strong>版本</strong>
+            {updateStatus.updateAvailable ? <span className="settings-update-dot" aria-hidden="true" /> : null}
+          </span>
+          <small>{getUpdateSummary(updateStatus)}</small>
+        </span>
+        <button
+          className="settings-upgrade-button"
+          type="button"
+          onClick={() => void handleUpgradeClick()}
+          disabled={updateStatus.checking || updateStatus.downloading}
+        >
+          {updateStatus.downloading ? "下载中" : updateStatus.checking ? "检查中" : "升级"}
+        </button>
+        <small className="settings-upgrade-hint">{getUpgradeHint(updateStatus, upgradeHint)}</small>
+      </div>
+      <label className="settings-extra-row settings-update-auto-row">
+        <span className="settings-row-title">
+          <strong>自动检查</strong>
+          <span className="settings-info" tabIndex={0} aria-label="每 24 小时检查一次 GitHub Release 是否有新版本。">
+            i
+            <span className="settings-tooltip">每 24 小时检查一次 GitHub Release 是否有新版本。</span>
+          </span>
+        </span>
+        <input
+          className="settings-toggle"
+          type="checkbox"
+          checked={settings.autoUpdateCheck}
+          onChange={(event) => updateAutoUpdateCheck(event.target.checked)}
+        />
+      </label>
     </aside>
   );
 }
@@ -215,4 +282,32 @@ function createDraftValues(settings: AppSettings): Record<IntervalSettingKey, st
     busyQuotaSeconds: formatNumber(settings.busyQuotaSeconds),
     idleQuotaSeconds: formatNumber(settings.idleQuotaSeconds / 60)
   };
+}
+
+function getUpdateSummary(updateStatus: UpdateStatus): string {
+  if (updateStatus.updateAvailable && updateStatus.latestVersion) {
+    return `当前 v${updateStatus.currentVersion} / 最新 v${updateStatus.latestVersion}`;
+  }
+
+  if (updateStatus.error) {
+    return "检查失败，可手动重试";
+  }
+
+  if (updateStatus.lastCheckedAt !== null) {
+    return `当前 v${updateStatus.currentVersion} / 已是最新`;
+  }
+
+  return `当前 v${updateStatus.currentVersion} / 24小时自动检查`;
+}
+
+function getUpgradeHint(updateStatus: UpdateStatus, upgradeHint: string | null): string {
+  if (updateStatus.downloading) {
+    return updateStatus.downloadProgress === null ? "下载中" : `${updateStatus.downloadProgress}%`;
+  }
+
+  if (updateStatus.checking) {
+    return "比较版本";
+  }
+
+  return upgradeHint ?? "";
 }

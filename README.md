@@ -10,7 +10,8 @@ CodexBar is a Windows tray utility that shows Codex quota status as a compact de
 - Busy-state lightning effect when an active Codex thread is detected.
 - Hover panels for the 5-hour and weekly windows, including reset countdowns and quota history curves.
 - Hover settings panel on the `Codex` label with polling interval, visual size, and auto-collapse controls.
-- Tray-only app shell: no taskbar button, no normal app window entry, and a right-click tray menu with only `退出软件`.
+- GitHub Release update check with red-dot notification when a newer version is available.
+- Tray-only app shell: no taskbar button, no normal app window entry, and a compact right-click tray menu for startup toggle and exit.
 
 ## Requirements
 
@@ -54,7 +55,7 @@ CodexBar is designed to stay quiet:
 - launching the executable does not create a taskbar button;
 - the desktop bar remains the primary UI surface;
 - the tray icon uses the same gold-and-emerald visual language as the bar;
-- right-clicking the tray icon shows only one command: `退出软件`.
+- right-clicking the tray icon shows `开机启动` / `开机启动√` and `退出软件`.
 
 ## Settings
 
@@ -65,6 +66,7 @@ Hover over the `Codex` text in the bar to open runtime settings.
 - `空闲时轮询间隔`: quota polling interval while no thread is active.
 - `视觉大小`: small, medium, or large bar and panel scale.
 - `自动收缩`: when enabled, the bar retracts into the top edge and expands on hover.
+- `自动检查`: checks GitHub Releases once every 24 hours. When a newer version exists, CodexBar shows a red dot near `Codex` and in the settings panel. The `升级` button compares versions first; if you are already current, it shows a short inline hint, and if a newer version exists it downloads the installer and launches it automatically.
 
 Invalid interval input is accepted while typing and validated only when the input loses focus. Invalid values fall back to the default for that setting.
 
@@ -83,7 +85,7 @@ The Windows executable, shortcuts, and tray icon all use the generated CodexBar 
 
 ## Release
 
-Version `v0.1.0` is the first public release.
+Version `v0.2.0` adds automatic update installation and a tray startup toggle.
 
 ## License
 
