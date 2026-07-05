@@ -85,7 +85,9 @@ The Windows executable, shortcuts, and tray icon all use the generated CodexBar 
 
 ## Release
 
-Version `v0.2.0` adds automatic update installation and a tray startup toggle.
+Version `v0.2.1` fixes transparent icon backgrounds and aligns the upgrade button in the settings panel.
+
+Public builds are currently unsigned, so Windows may show an unknown-publisher warning during installation.
 
 ## License
 

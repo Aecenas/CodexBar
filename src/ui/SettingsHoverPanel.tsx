@@ -243,15 +243,17 @@ export function SettingsHoverPanel({
           </span>
           <small>{getUpdateSummary(updateStatus)}</small>
         </span>
-        <button
-          className="settings-upgrade-button"
-          type="button"
-          onClick={() => void handleUpgradeClick()}
-          disabled={updateStatus.checking || updateStatus.downloading}
-        >
-          {updateStatus.downloading ? "下载中" : updateStatus.checking ? "检查中" : "升级"}
-        </button>
-        <small className="settings-upgrade-hint">{getUpgradeHint(updateStatus, upgradeHint)}</small>
+        <span className="settings-upgrade-control">
+          <button
+            className="settings-upgrade-button"
+            type="button"
+            onClick={() => void handleUpgradeClick()}
+            disabled={updateStatus.checking || updateStatus.downloading}
+          >
+            {updateStatus.downloading ? "下载中" : updateStatus.checking ? "检查中" : "升级"}
+          </button>
+          <small className="settings-upgrade-hint">{getUpgradeHint(updateStatus, upgradeHint)}</small>
+        </span>
       </div>
       <label className="settings-extra-row settings-update-auto-row">
         <span className="settings-row-title">

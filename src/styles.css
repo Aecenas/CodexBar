@@ -530,7 +530,7 @@ body {
 
 .settings-update-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   min-height: 34px;
   gap: 14px;
@@ -538,6 +538,7 @@ body {
 
 .settings-update-copy {
   min-width: 0;
+  flex: 1 1 auto;
   display: grid;
   gap: 3px;
 }
@@ -563,6 +564,14 @@ body {
     0 0 12px rgba(255, 77, 93, 0.35);
 }
 
+.settings-upgrade-control {
+  margin-left: auto;
+  min-width: 70px;
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
 .settings-upgrade-button {
   position: relative;
   min-width: 54px;
@@ -583,10 +592,11 @@ body {
 }
 
 .settings-upgrade-hint {
-  width: 44px;
+  min-width: 54px;
+  min-height: 11px;
   color: rgba(232, 214, 164, 0.78);
   font-size: 9px;
-  text-align: left;
+  text-align: right;
 }
 
 .settings-update-auto-row {
