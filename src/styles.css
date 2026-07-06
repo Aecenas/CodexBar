@@ -273,8 +273,8 @@ body {
   left: 154px;
   z-index: 20;
   width: 370px;
-  height: 350px;
-  padding: 13px 15px 12px;
+  height: 370px;
+  padding: 13px 15px 18px;
   font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
   color: rgba(243, 247, 236, 0.92);
   border: 1px solid rgba(220, 190, 130, 0.62);
@@ -601,6 +601,7 @@ body {
 
 .settings-update-auto-row {
   margin-top: 7px;
+  margin-bottom: 10px;
 }
 
 .settings-row-control input:focus {

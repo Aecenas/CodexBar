@@ -27,11 +27,14 @@ const windowSizes: Record<
   large: { width: 768, collapsedHeight: 89, panelTop: 97, panelScale: 1.14 }
 };
 
-const settingsPanelHeight = 350;
+const settingsPanelHeight = 370;
 const expandedWindowPadding = 32;
+const collapsedPeekHeight = 10;
 
 let currentVisualSize: VisualSize = "medium";
 let panelExpanded = false;
+let barCollapsed = false;
+let mousePassthrough = false;
 
 function createWindow(): void {
   const display = screen.getPrimaryDisplay();
@@ -98,7 +101,27 @@ app.whenReady().then(() => {
 
   ipcMain.on("panel:set-expanded", (_event, expanded: boolean) => {
     panelExpanded = expanded;
+    if (expanded) {
+      barCollapsed = false;
+    }
     applyWindowLayout();
+  });
+
+  ipcMain.on("bar:set-collapsed", (_event, collapsed: boolean) => {
+    barCollapsed = collapsed;
+    if (collapsed) {
+      setMousePassthrough(false);
+    }
+    applyWindowLayout();
+  });
+
+  ipcMain.on("bar:set-mouse-passthrough", (_event, passthrough: boolean) => {
+    if (barCollapsed) {
+      setMousePassthrough(false);
+      return;
+    }
+
+    setMousePassthrough(passthrough);
   });
 
   ipcMain.on("panel:set-visual-size", (_event, visualSize: VisualSize) => {
@@ -155,7 +178,7 @@ function applyWindowLayout(): void {
   const display = screen.getPrimaryDisplay();
   const size = windowSizes[currentVisualSize];
   const width = size.width;
-  const height = panelExpanded ? getExpandedHeight(size) : size.collapsedHeight;
+  const height = panelExpanded ? getExpandedHeight(size) : barCollapsed ? collapsedPeekHeight : size.collapsedHeight;
   const x = Math.round(display.workArea.x + (display.workArea.width - width) / 2);
   const y = display.workArea.y;
   const bounds = mainWindow.getBounds();
@@ -163,6 +186,15 @@ function applyWindowLayout(): void {
   if (bounds.width !== width || bounds.height !== height || bounds.x !== x || bounds.y !== y) {
     mainWindow.setBounds({ ...bounds, x, y, width, height }, false);
   }
+}
+
+function setMousePassthrough(passthrough: boolean): void {
+  if (!mainWindow || mainWindow.isDestroyed() || mousePassthrough === passthrough) {
+    return;
+  }
+
+  mousePassthrough = passthrough;
+  mainWindow.setIgnoreMouseEvents(passthrough, { forward: true });
 }
 
 function getExpandedHeight(size: { panelTop: number; panelScale: number }): number {

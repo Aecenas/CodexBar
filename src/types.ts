@@ -53,6 +53,8 @@ export interface UpdateDownloadProgress {
 export interface CodexBarBridge {
   onQuotaUpdate(callback: (payload: QuotaUpdatePayload) => void): () => void;
   setPanelExpanded(expanded: boolean): void;
+  setBarCollapsed(collapsed: boolean): void;
+  setMousePassthrough(passthrough: boolean): void;
   setVisualSize(visualSize: VisualSize): void;
   getPollingSettings(): Promise<PollingSettings>;
   setPollingSettings(settings: PollingSettings): Promise<PollingSettings>;

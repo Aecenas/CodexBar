@@ -1,9 +1,7 @@
-import { app, shell, type WebContents } from "electron";
+import { app, net, shell, type WebContents } from "electron";
 import { createWriteStream } from "node:fs";
 import { mkdir, unlink } from "node:fs/promises";
-import https from "node:https";
 import path from "node:path";
-import { URL } from "node:url";
 import type { UpdateDownloadProgress, UpdateStatus } from "./types.js";
 
 interface GitHubAsset {
@@ -94,111 +92,75 @@ function findInstallerAsset(release: GitHubLatestRelease): GitHubAsset | null {
   );
 }
 
-function requestJson<T>(url: string, redirects = 0): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const request = https.get(
-      url,
-      {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "User-Agent": "CodexBar"
-        }
-      },
-      (response) => {
-        if (isRedirect(response.statusCode) && response.headers.location) {
-          response.resume();
-          if (redirects >= 5) {
-            reject(new Error("Too many redirects."));
-            return;
-          }
-          resolve(requestJson<T>(new URL(response.headers.location, url).toString(), redirects + 1));
-          return;
-        }
-
-        if (response.statusCode !== 200) {
-          response.resume();
-          reject(new Error(`GitHub release check failed: ${response.statusCode}`));
-          return;
-        }
-
-        let body = "";
-        response.setEncoding("utf8");
-        response.on("data", (chunk: string) => {
-          body += chunk;
-        });
-        response.on("end", () => {
-          try {
-            resolve(JSON.parse(body) as T);
-          } catch (error) {
-            reject(error);
-          }
-        });
-      }
-    );
-
-    request.on("error", reject);
+async function requestJson<T>(url: string): Promise<T> {
+  const response = await net.fetch(url, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "CodexBar"
+    }
   });
+
+  if (!response.ok) {
+    throw new Error(`GitHub release check failed: ${response.status}`);
+  }
+
+  return (await response.json()) as T;
 }
 
-function downloadFile(
+async function downloadFile(
   url: string,
   destination: string,
-  onProgress: (progress: UpdateDownloadProgress) => void,
-  redirects = 0
+  onProgress: (progress: UpdateDownloadProgress) => void
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const request = https.get(
-      url,
-      {
-        headers: {
-          "User-Agent": "CodexBar"
-        }
-      },
-      (response) => {
-        if (isRedirect(response.statusCode) && response.headers.location) {
-          response.resume();
-          if (redirects >= 5) {
-            reject(new Error("Too many redirects."));
-            return;
-          }
-          resolve(downloadFile(new URL(response.headers.location, url).toString(), destination, onProgress, redirects + 1));
-          return;
-        }
-
-        if (response.statusCode !== 200) {
-          response.resume();
-          reject(new Error(`下载安装包失败: ${response.statusCode}`));
-          return;
-        }
-
-        const totalBytes = Number.parseInt(response.headers["content-length"] ?? "", 10);
-        const safeTotalBytes = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : null;
-        let receivedBytes = 0;
-        const file = createWriteStream(destination);
-
-        response.on("data", (chunk: Buffer) => {
-          receivedBytes += chunk.length;
-          onProgress({
-            receivedBytes,
-            totalBytes: safeTotalBytes,
-            percent: safeTotalBytes === null ? null : Math.min(100, Math.round((receivedBytes / safeTotalBytes) * 100))
-          });
-        });
-
-        response.pipe(file);
-        file.on("finish", () => {
-          file.close(() => resolve());
-        });
-        file.on("error", reject);
-      }
-    );
-
-    request.on("error", reject);
+  const response = await net.fetch(url, {
+    headers: {
+      "User-Agent": "CodexBar"
+    }
   });
-}
 
-function isRedirect(statusCode: number | undefined): boolean {
-  return typeof statusCode === "number" && statusCode >= 300 && statusCode < 400;
+  if (!response.ok) {
+    throw new Error(`下载安装包失败: ${response.status}`);
+  }
+
+  if (!response.body) {
+    throw new Error("下载安装包失败: 响应内容为空。");
+  }
+
+  const totalBytes = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+  const safeTotalBytes = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : null;
+  let receivedBytes = 0;
+  const file = createWriteStream(destination);
+  const reader = response.body.getReader();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      receivedBytes += value.byteLength;
+      if (!file.write(Buffer.from(value))) {
+        await new Promise<void>((resolve, reject) => {
+          file.once("drain", resolve);
+          file.once("error", reject);
+        });
+      }
+
+      onProgress({
+        receivedBytes,
+        totalBytes: safeTotalBytes,
+        percent: safeTotalBytes === null ? null : Math.min(100, Math.round((receivedBytes / safeTotalBytes) * 100))
+      });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    file.end(() => resolve());
+    file.once("error", reject);
+  });
 }
 
 function isNewerVersion(latest: string, current: string): boolean {

@@ -140,6 +140,8 @@ export function App() {
 
       const next = {
         ...installed,
+        currentVersion: installed.latestVersion ?? installed.currentVersion,
+        updateAvailable: false,
         checking: false,
         downloading: false,
         downloadProgress: 100

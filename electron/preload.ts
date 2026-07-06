@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld("codexBar", {
   setPanelExpanded(expanded: boolean) {
     ipcRenderer.send("panel:set-expanded", expanded);
   },
+  setBarCollapsed(collapsed: boolean) {
+    ipcRenderer.send("bar:set-collapsed", collapsed);
+  },
+  setMousePassthrough(passthrough: boolean) {
+    ipcRenderer.send("bar:set-mouse-passthrough", passthrough);
+  },
   setVisualSize(visualSize: VisualSize) {
     ipcRenderer.send("panel:set-visual-size", visualSize);
   },

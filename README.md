@@ -85,7 +85,7 @@ The Windows executable, shortcuts, and tray icon all use the generated CodexBar 
 
 ## Release
 
-Version `v0.2.1` fixes transparent icon backgrounds and aligns the upgrade button in the settings panel.
+Version `v0.3.0` adds click-through transparent bar regions, improves auto-collapse hit testing, uses Electron's network stack for update downloads, clears update indicators after launching the installer, and adds spacing under the update settings.
 
 Public builds are currently unsigned, so Windows may show an unknown-publisher warning during installation.
 
