@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AppSettings, PollingSettings, QuotaHistoryPoint, QuotaUpdatePayload, UpdateStatus } from "../types";
 import { DEFAULT_APP_SETTINGS, DEFAULT_POLLING_SETTINGS, normalizeAppSettings, normalizePollingSettings } from "../pollingSettings";
 import {
@@ -29,6 +29,7 @@ export function App() {
   const [history, setHistory] = useState<QuotaHistoryPoint[]>(() => readHistory());
   const [appSettings, setAppSettingsState] = useState<AppSettings>(() => readAppSettings());
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(() => readUpdateStatus());
+  const launchUpdateCheckStarted = useRef(false);
 
   useEffect(() => {
     return window.codexBar?.onQuotaUpdate((payload) => {
@@ -56,6 +57,15 @@ export function App() {
   }, [appSettings]);
 
   useEffect(() => {
+    if (launchUpdateCheckStarted.current) {
+      return;
+    }
+
+    launchUpdateCheckStarted.current = true;
+    void checkForUpdates();
+  }, []);
+
+  useEffect(() => {
     if (!appSettings.autoUpdateCheck) {
       return undefined;
     }
@@ -75,7 +85,7 @@ export function App() {
     writeAppSettings(normalized);
   }
 
-  async function checkForUpdates(): Promise<void> {
+  async function checkForUpdates(): Promise<UpdateStatus> {
     setUpdateStatus((current) => ({ ...current, checking: true, error: null }));
 
     try {
@@ -85,12 +95,13 @@ export function App() {
       }
       setUpdateStatus(next);
       writeUpdateStatus(next);
+      return next;
     } catch (error) {
       const next: UpdateStatus = {
         ...initialUpdateStatus,
         latestVersion: updateStatus.latestVersion,
         releaseUrl: updateStatus.releaseUrl,
-        updateAvailable: updateStatus.updateAvailable,
+        updateAvailable: false,
         checking: false,
         downloading: false,
         downloadProgress: null,
@@ -99,6 +110,7 @@ export function App() {
       };
       setUpdateStatus(next);
       writeUpdateStatus(next);
+      return next;
     }
   }
 
@@ -154,7 +166,7 @@ export function App() {
         ...initialUpdateStatus,
         latestVersion: updateStatus.latestVersion,
         releaseUrl: updateStatus.releaseUrl,
-        updateAvailable: updateStatus.updateAvailable,
+        updateAvailable: false,
         checking: false,
         downloading: false,
         downloadProgress: null,
@@ -174,6 +186,7 @@ export function App() {
       appSettings={appSettings}
       updateStatus={updateStatus}
       onAppSettingsChange={setAppSettings}
+      onCheckForUpdates={checkForUpdates}
       onUpgrade={upgradeApp}
     />
   );

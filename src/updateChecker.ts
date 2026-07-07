@@ -21,7 +21,7 @@ export function normalizeStoredUpdateStatus(status: Partial<UpdateStatus> | null
     currentVersion: APP_VERSION,
     latestVersion: typeof status?.latestVersion === "string" ? status.latestVersion : null,
     releaseUrl: typeof status?.releaseUrl === "string" ? status.releaseUrl : RELEASES_URL,
-    updateAvailable: status?.updateAvailable === true,
+    updateAvailable: false,
     checking: false,
     downloading: false,
     downloadProgress: null,

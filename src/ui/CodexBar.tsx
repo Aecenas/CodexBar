@@ -13,6 +13,7 @@ interface CodexBarProps {
   appSettings: AppSettings;
   updateStatus: UpdateStatus;
   onAppSettingsChange: (settings: AppSettings) => void;
+  onCheckForUpdates: () => Promise<UpdateStatus>;
   onUpgrade: () => Promise<UpdateStatus>;
 }
 
@@ -33,6 +34,7 @@ export function CodexBar({
   appSettings,
   updateStatus,
   onAppSettingsChange,
+  onCheckForUpdates,
   onUpgrade
 }: CodexBarProps) {
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
@@ -51,9 +53,6 @@ export function CodexBar({
 
   useEffect(() => {
     window.codexBar?.setBarCollapsed(collapsed);
-    if (collapsed) {
-      setMousePassthrough(false);
-    }
   }, [collapsed]);
 
   useEffect(() => {
@@ -187,16 +186,11 @@ export function CodexBar({
     window.codexBar?.setMousePassthrough(passthrough);
   }
 
-  function updateMousePassthrough(event: ReactPointerEvent<HTMLElement> | ReactMouseEvent<HTMLElement>): void {
-    if (collapsed) {
-      setMousePassthrough(false);
-      return;
-    }
-
+  function updateMousePassthrough(event: ReactPointerEvent<HTMLElement> | ReactMouseEvent<HTMLElement>): boolean {
     const context = barAlphaContext.current;
     if (!context) {
       setMousePassthrough(false);
-      return;
+      return false;
     }
 
     const rect = event.currentTarget.getBoundingClientRect();
@@ -208,11 +202,27 @@ export function CodexBar({
 
     if (sourceX < 0 || sourceX >= BAR_SOURCE_WIDTH || sourceY < 0 || sourceY >= BAR_SOURCE_HEIGHT) {
       setMousePassthrough(false);
-      return;
+      return false;
     }
 
     const alpha = context.getImageData(sourceX, sourceY, 1, 1).data[3];
-    setMousePassthrough(alpha <= TRANSPARENT_ALPHA_THRESHOLD);
+    const passthrough = alpha <= TRANSPARENT_ALPHA_THRESHOLD;
+    setMousePassthrough(passthrough);
+    return passthrough;
+  }
+
+  function handlePointerEnter(event: ReactPointerEvent<HTMLElement> | ReactMouseEvent<HTMLElement>): void {
+    const passthrough = updateMousePassthrough(event);
+    if (!passthrough) {
+      revealForPointer();
+    }
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLElement> | ReactMouseEvent<HTMLElement>): void {
+    const passthrough = updateMousePassthrough(event);
+    if (collapsed && !passthrough) {
+      revealForPointer();
+    }
   }
 
   function handlePointerLeave(): void {
@@ -226,11 +236,11 @@ export function CodexBar({
         collapsed ? "is-collapsed" : ""
       }`}
       aria-label="Codex usage status"
-      onPointerEnter={revealForPointer}
-      onPointerMove={updateMousePassthrough}
+      onPointerEnter={handlePointerEnter}
+      onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
-      onMouseEnter={revealForPointer}
-      onMouseMove={updateMousePassthrough}
+      onMouseEnter={handlePointerEnter}
+      onMouseMove={handlePointerMove}
       onMouseLeave={handlePointerLeave}
     >
       <section className="bar" aria-live="polite">
@@ -297,6 +307,7 @@ export function CodexBar({
           settings={appSettings}
           updateStatus={updateStatus}
           onChange={handleAppSettingsChange}
+          onCheckForUpdates={onCheckForUpdates}
           onUpgrade={onUpgrade}
           onPointerEnter={keepPanelOpen}
           onPointerLeave={scheduleHidePanel}

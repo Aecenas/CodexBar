@@ -11,6 +11,7 @@ interface SettingsHoverPanelProps {
   settings: AppSettings;
   updateStatus: UpdateStatus;
   onChange: (settings: AppSettings) => void;
+  onCheckForUpdates: () => Promise<UpdateStatus>;
   onUpgrade: () => Promise<UpdateStatus>;
   onPointerEnter: () => void;
   onPointerLeave: () => void;
@@ -58,6 +59,7 @@ export function SettingsHoverPanel({
   settings,
   updateStatus,
   onChange,
+  onCheckForUpdates,
   onUpgrade,
   onPointerEnter,
   onPointerLeave
@@ -70,6 +72,10 @@ export function SettingsHoverPanel({
   useEffect(() => {
     setDraftValues(createDraftValues(settings));
   }, [settings.activityCheckSeconds, settings.busyQuotaSeconds, settings.idleQuotaSeconds]);
+
+  useEffect(() => {
+    void onCheckForUpdates();
+  }, []);
 
   useEffect(() => {
     if (upgradeHint === null) {

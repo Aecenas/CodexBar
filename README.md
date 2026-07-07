@@ -85,7 +85,7 @@ The Windows executable, shortcuts, and tray icon all use the generated CodexBar 
 
 ## Release
 
-Version `v0.3.0` adds click-through transparent bar regions, improves auto-collapse hit testing, uses Electron's network stack for update downloads, clears update indicators after launching the installer, and adds spacing under the update settings.
+Version `v0.3.1` tightens update-badge rules: the red dot only appears after a fresh GitHub version comparison, checks run on launch and when reopening the Codex settings panel, and collapsed transparent pixels can click through.
 
 Public builds are currently unsigned, so Windows may show an unknown-publisher warning during installation.
 

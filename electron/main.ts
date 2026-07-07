@@ -109,18 +109,10 @@ app.whenReady().then(() => {
 
   ipcMain.on("bar:set-collapsed", (_event, collapsed: boolean) => {
     barCollapsed = collapsed;
-    if (collapsed) {
-      setMousePassthrough(false);
-    }
     applyWindowLayout();
   });
 
   ipcMain.on("bar:set-mouse-passthrough", (_event, passthrough: boolean) => {
-    if (barCollapsed) {
-      setMousePassthrough(false);
-      return;
-    }
-
     setMousePassthrough(passthrough);
   });
 
