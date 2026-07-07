@@ -18,6 +18,7 @@ interface CodexBarProps {
 }
 
 type ActivePanel = "fiveHour" | "week" | "settings" | null;
+type ContextMenuPosition = { x: number; y: number } | null;
 
 const BAR_SOURCE_WIDTH = 960;
 const BAR_SOURCE_HEIGHT = 111;
@@ -38,6 +39,7 @@ export function CodexBar({
   onUpgrade
 }: CodexBarProps) {
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuPosition>(null);
   const [autoRevealed, setAutoRevealed] = useState(() => !appSettings.autoCollapse);
   const hideTimer = useRef<number | null>(null);
   const collapseTimer = useRef<number | null>(null);
@@ -46,11 +48,12 @@ export function CodexBar({
   const mousePassthrough = useRef(false);
   const dragPointerId = useRef<number | null>(null);
   const stateLabel = quota.status === "ready" ? "Online" : quota.status === "loading" ? "Loading" : "Stale";
-  const collapsed = appSettings.autoCollapse && !autoRevealed && activePanel === null;
+  const contextMenuOpen = contextMenu !== null;
+  const collapsed = appSettings.autoCollapse && !autoRevealed && activePanel === null && !contextMenuOpen;
 
   useEffect(() => {
-    window.codexBar?.setPanelExpanded(activePanel !== null);
-  }, [activePanel]);
+    window.codexBar?.setPanelExpanded(activePanel !== null || contextMenuOpen);
+  }, [activePanel, contextMenuOpen]);
 
   useEffect(() => {
     window.codexBar?.setBarCollapsed(collapsed);
@@ -67,7 +70,7 @@ export function CodexBar({
       return;
     }
 
-    if (activePanel !== null) {
+    if (activePanel !== null || contextMenuOpen) {
       setAutoRevealed(true);
       clearCollapseTimer();
       return;
@@ -81,7 +84,7 @@ export function CodexBar({
     }
 
     scheduleAutoCollapse();
-  }, [activePanel, appSettings.autoCollapse]);
+  }, [activePanel, appSettings.autoCollapse, contextMenuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,6 +133,7 @@ export function CodexBar({
     }
     clearCollapseTimer();
     setAutoRevealed(true);
+    setContextMenu(null);
     setActivePanel(panel);
   }
 
@@ -155,7 +159,7 @@ export function CodexBar({
   }
 
   function scheduleAutoCollapse(): void {
-    if (!appSettings.autoCollapse || activePanel !== null) {
+    if (!appSettings.autoCollapse || activePanel !== null || contextMenuOpen) {
       return;
     }
 
@@ -241,6 +245,11 @@ export function CodexBar({
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLElement>): void {
+    if (contextMenuOpen && !isContextMenuTarget(event.target)) {
+      setContextMenu(null);
+      return;
+    }
+
     if (!appSettings.positionAdjustment || collapsed || event.button !== 0 || isInteractiveTarget(event.target)) {
       return;
     }
@@ -261,6 +270,30 @@ export function CodexBar({
     event.currentTarget.setPointerCapture(event.pointerId);
     window.codexBar?.startBarDrag(event.screenX, event.screenY);
     event.preventDefault();
+  }
+
+  function handleContextMenu(event: ReactMouseEvent<HTMLElement>): void {
+    if (collapsed || isInteractiveTarget(event.target)) {
+      return;
+    }
+
+    const passthrough = updateMousePassthrough(event);
+    if (passthrough) {
+      setContextMenu(null);
+      return;
+    }
+
+    event.preventDefault();
+    clearCollapseTimer();
+    setAutoRevealed(true);
+    setMousePassthrough(false);
+    setActivePanel(null);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 96;
+    setContextMenu({
+      x: Math.max(4, Math.min(event.clientX - rect.left + 8, rect.width - menuWidth - 4)),
+      y: Math.max(4, event.clientY - rect.top + 8)
+    });
   }
 
   async function finishPointerDrag(event: ReactPointerEvent<HTMLElement>): Promise<void> {
@@ -297,6 +330,7 @@ export function CodexBar({
       onMouseEnter={handlePointerEnter}
       onMouseMove={handlePointerMove}
       onMouseLeave={handlePointerLeave}
+      onContextMenu={handleContextMenu}
     >
       <section className="bar" aria-live="polite">
         <div className="metric-slot metric-five">
@@ -343,6 +377,7 @@ export function CodexBar({
         <QuotaHoverPanel
           kind="fiveHour"
           resetAt={quota.fiveHourResetAt}
+          tokensUsed={quota.fiveHourTokensUsed}
           history={history}
           onPointerEnter={keepPanelOpen}
           onPointerLeave={scheduleHidePanel}
@@ -352,6 +387,7 @@ export function CodexBar({
         <QuotaHoverPanel
           kind="week"
           resetAt={quota.weekResetAt}
+          tokensUsed={quota.weekTokensUsed}
           history={history}
           onPointerEnter={keepPanelOpen}
           onPointerLeave={scheduleHidePanel}
@@ -368,6 +404,18 @@ export function CodexBar({
           onPointerLeave={scheduleHidePanel}
         />
       ) : null}
+      {contextMenu ? (
+        <div
+          className="bar-context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button type="button" onClick={() => window.codexBar?.quitApp()}>
+            退出软件
+          </button>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -375,6 +423,10 @@ export function CodexBar({
 function isInteractiveTarget(target: EventTarget): boolean {
   return (
     target instanceof Element &&
-    target.closest(".quota-panel, .settings-panel, button, input, textarea, select, a") !== null
+    target.closest(".quota-panel, .settings-panel, .bar-context-menu, button, input, textarea, select, a") !== null
   );
+}
+
+function isContextMenuTarget(target: EventTarget): boolean {
+  return target instanceof Element && target.closest(".bar-context-menu") !== null;
 }

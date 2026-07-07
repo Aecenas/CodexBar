@@ -23,6 +23,8 @@ export interface QuotaUpdatePayload {
   weekRemaining: number | null;
   fiveHourResetAt: number | null;
   weekResetAt: number | null;
+  fiveHourTokensUsed: number | null;
+  weekTokensUsed: number | null;
   status: QuotaStatus;
   activity: ActivityState;
   fetchedAt: number | null;
@@ -54,3 +56,27 @@ export interface PollingSettings {
 }
 
 export type VisualSize = "small" | "medium" | "large";
+
+export interface ActivityDiagnostics {
+  sessionsDir: string;
+  lastProbeAt: number | null;
+  lastSource: string;
+  lastThreadStatus: string | null;
+}
+
+export interface TokenUsageDiagnostics {
+  sessionsDir: string;
+  cachedFiles: number;
+  cachedBuckets: number;
+  lastReadAt: number | null;
+}
+
+export interface AppDiagnostics {
+  activity: ActivityState;
+  quotaStatus: QuotaStatus;
+  lastQuotaReadAt: number | null;
+  lastQuotaError: string | null;
+  lastQuotaFetchedAt: number | null;
+  activityDetector: ActivityDiagnostics;
+  tokenUsage: TokenUsageDiagnostics;
+}

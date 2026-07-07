@@ -13,6 +13,8 @@ const initialPayload: QuotaUpdatePayload = {
   weekRemaining: null,
   fiveHourResetAt: null,
   weekResetAt: null,
+  fiveHourTokensUsed: null,
+  weekTokensUsed: null,
   status: "loading",
   activity: "unknown",
   fetchedAt: null
@@ -30,6 +32,7 @@ export function App() {
   const [appSettings, setAppSettingsState] = useState<AppSettings>(() => readAppSettings());
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(() => readUpdateStatus());
   const launchUpdateCheckStarted = useRef(false);
+  const [openAtLoginLoaded, setOpenAtLoginLoaded] = useState(false);
 
   useEffect(() => {
     return window.codexBar?.onQuotaUpdate((payload) => {
@@ -56,6 +59,35 @@ export function App() {
     window.codexBar?.setVisualSize(appSettings.visualSize);
     window.codexBar?.setBarPositioning(appSettings.positionAdjustment, appSettings.barX);
   }, [appSettings]);
+
+  useEffect(() => {
+    void window.codexBar?.getOpenAtLogin().then((openAtLogin) => {
+      setAppSettingsState((current) => {
+        const next = normalizeAppSettings({ ...current, openAtLogin });
+        writeAppSettings(next);
+        return next;
+      });
+      setOpenAtLoginLoaded(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!openAtLoginLoaded) {
+      return;
+    }
+
+    void window.codexBar?.setOpenAtLogin(appSettings.openAtLogin).then((openAtLogin) => {
+      if (openAtLogin === appSettings.openAtLogin) {
+        return;
+      }
+
+      setAppSettingsState((current) => {
+        const next = normalizeAppSettings({ ...current, openAtLogin });
+        writeAppSettings(next);
+        return next;
+      });
+    });
+  }, [appSettings.openAtLogin, openAtLoginLoaded]);
 
   useEffect(() => {
     if (launchUpdateCheckStarted.current) {
@@ -146,7 +178,7 @@ export function App() {
       };
       setUpdateStatus(downloading);
 
-      const installed = await window.codexBar?.downloadAndInstallUpdate();
+      const installed = await window.codexBar?.downloadAndInstallUpdate(appSettings.downloadProxyPrefix);
       if (!installed) {
         throw new Error("下载安装接口不可用。");
       }

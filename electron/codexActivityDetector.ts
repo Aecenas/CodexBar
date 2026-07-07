@@ -1,5 +1,5 @@
 import type { CodexAppServerClient } from "./codexAppServerClient.js";
-import type { ActivityState } from "./types.js";
+import type { ActivityDiagnostics, ActivityState } from "./types.js";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -12,27 +12,57 @@ interface ThreadLike {
 }
 
 export class CodexActivityDetector {
+  private readonly sessionsDir = path.join(CODEX_HOME, "sessions");
+  private lastProbeAt: number | null = null;
+  private lastSource = "not-started";
+  private lastThreadStatus: string | null = null;
+
   constructor(private readonly client: CodexAppServerClient) {}
 
   async getActivity(): Promise<ActivityState> {
+    this.lastProbeAt = Date.now();
     try {
       const threads = (await this.client.listThreads(8)) as ThreadLike[];
-      if (threads.some((thread) => thread.status?.type === "active")) {
+      this.lastThreadStatus = threads.map((thread) => thread.status?.type).find(Boolean) ?? null;
+      if (threads.some((thread) => thread.status?.type === "running" || thread.status?.type === "active")) {
+        this.lastSource = "thread-status";
         return "busy";
       }
 
-      return (await this.hasRecentSessionWrite()) ? "busy" : "idle";
+      if (await this.hasRecentSessionWrite()) {
+        this.lastSource = "session-write";
+        return "busy";
+      }
+
+      this.lastSource = "idle";
+      return "idle";
     } catch {
       try {
-        return (await this.hasRecentSessionWrite()) ? "busy" : "unknown";
+        if (await this.hasRecentSessionWrite()) {
+          this.lastSource = "fallback-session-write";
+          return "busy";
+        }
+
+        this.lastSource = "unknown";
+        return "unknown";
       } catch {
+        this.lastSource = "error";
         return "unknown";
       }
     }
   }
 
+  getDiagnostics(): ActivityDiagnostics {
+    return {
+      sessionsDir: this.sessionsDir,
+      lastProbeAt: this.lastProbeAt,
+      lastSource: this.lastSource,
+      lastThreadStatus: this.lastThreadStatus
+    };
+  }
+
   private async hasRecentSessionWrite(): Promise<boolean> {
-    const newestWrite = await this.findNewestSessionWrite(path.join(CODEX_HOME, "sessions"));
+    const newestWrite = await this.findNewestSessionWrite(this.sessionsDir);
     if (!newestWrite) {
       return false;
     }

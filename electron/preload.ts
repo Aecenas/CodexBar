@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { PollingSettings, QuotaUpdatePayload, UpdateDownloadProgress, UpdateStatus, VisualSize } from "./types.js";
+import type {
+  AppDiagnostics,
+  PollingSettings,
+  QuotaUpdatePayload,
+  UpdateDownloadProgress,
+  UpdateStatus,
+  VisualSize
+} from "./types.js";
 
 contextBridge.exposeInMainWorld("codexBar", {
   onQuotaUpdate(callback: (payload: QuotaUpdatePayload) => void) {
@@ -28,8 +35,20 @@ contextBridge.exposeInMainWorld("codexBar", {
   endBarDrag() {
     return ipcRenderer.invoke("bar:drag-end") as Promise<number | null>;
   },
+  quitApp() {
+    ipcRenderer.send("app:quit");
+  },
   setVisualSize(visualSize: VisualSize) {
     ipcRenderer.send("panel:set-visual-size", visualSize);
+  },
+  getOpenAtLogin() {
+    return ipcRenderer.invoke("app:get-open-at-login") as Promise<boolean>;
+  },
+  setOpenAtLogin(openAtLogin: boolean) {
+    return ipcRenderer.invoke("app:set-open-at-login", openAtLogin) as Promise<boolean>;
+  },
+  getDiagnostics() {
+    return ipcRenderer.invoke("app:get-diagnostics") as Promise<AppDiagnostics | null>;
   },
   getPollingSettings() {
     return ipcRenderer.invoke("polling:get-settings") as Promise<PollingSettings>;
@@ -40,8 +59,8 @@ contextBridge.exposeInMainWorld("codexBar", {
   checkForUpdates() {
     return ipcRenderer.invoke("updates:check") as Promise<UpdateStatus>;
   },
-  downloadAndInstallUpdate() {
-    return ipcRenderer.invoke("updates:download-and-install") as Promise<UpdateStatus>;
+  downloadAndInstallUpdate(downloadProxyPrefix?: string) {
+    return ipcRenderer.invoke("updates:download-and-install", downloadProxyPrefix) as Promise<UpdateStatus>;
   },
   onUpdateDownloadProgress(callback: (progress: UpdateDownloadProgress) => void) {
     const listener = (_event: Electron.IpcRendererEvent, progress: UpdateDownloadProgress) => callback(progress);

@@ -253,6 +253,23 @@ body {
   letter-spacing: 0;
 }
 
+.quota-panel-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+
+.quota-panel-title small {
+  color: rgba(126, 246, 199, 0.92);
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-shadow:
+    0 0 7px rgba(76, 233, 178, 0.32),
+    0 0 13px rgba(76, 233, 178, 0.14);
+}
+
 .quota-panel-header strong {
   color: #e8d6a4;
   font-size: 16px;
@@ -273,7 +290,7 @@ body {
   left: 154px;
   z-index: 20;
   width: 370px;
-  height: 405px;
+  height: 500px;
   padding: 13px 15px 18px;
   font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
   color: rgba(243, 247, 236, 0.92);
@@ -302,6 +319,41 @@ body {
   top: -1px;
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(245, 224, 163, 0.82), transparent);
+}
+
+.bar-context-menu {
+  position: absolute;
+  z-index: 35;
+  width: 96px;
+  padding: 5px;
+  border: 1px solid rgba(220, 190, 130, 0.58);
+  border-radius: 6px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(72, 148, 111, 0.2), transparent 42%),
+    linear-gradient(135deg, rgba(7, 22, 19, 0.98), rgba(8, 38, 31, 0.96));
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.34),
+    0 0 14px rgba(71, 221, 166, 0.12),
+    inset 0 1px 0 rgba(255, 245, 203, 0.16);
+  backdrop-filter: blur(8px);
+  -webkit-app-region: no-drag;
+}
+
+.bar-context-menu button {
+  width: 100%;
+  height: 27px;
+  color: rgba(232, 214, 164, 0.94);
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 650;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(232, 214, 164, 0.1);
+}
+
+.bar-context-menu button:hover {
+  color: rgba(5, 21, 18, 0.94);
+  background: rgba(232, 214, 164, 0.84);
 }
 
 .settings-panel-header {
@@ -603,9 +655,210 @@ body {
   margin-top: 7px;
 }
 
+.settings-tools-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 31px;
+  margin-top: 8px;
+  padding: 4px 7px 4px 0;
+  border-radius: 5px;
+}
+
+.settings-tools-row.active {
+  background: rgba(232, 214, 164, 0.06);
+}
+
+.settings-tools-row strong {
+  color: rgba(242, 247, 237, 0.9);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-tools-summary {
+  min-width: 0;
+  color: rgba(214, 225, 210, 0.54);
+  font-size: 9px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-tools-arrow {
+  color: rgba(232, 214, 164, 0.8);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.settings-tools-panel {
+  position: absolute;
+  left: calc(100% + 14px);
+  top: -110px;
+  z-index: 45;
+  width: 286px;
+  padding: 12px;
+  color: rgba(243, 247, 236, 0.92);
+  border: 1px solid rgba(220, 190, 130, 0.58);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(64, 124, 96, 0.28), transparent 36%),
+    radial-gradient(circle at 92% 82%, rgba(83, 202, 153, 0.16), transparent 34%),
+    linear-gradient(135deg, rgba(7, 22, 19, 0.98), rgba(8, 42, 33, 0.95) 54%, rgba(4, 15, 14, 0.98));
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.42),
+    0 0 18px rgba(71, 221, 166, 0.14),
+    inset 0 1px 0 rgba(255, 245, 203, 0.18);
+  backdrop-filter: blur(10px);
+}
+
+.settings-tools-panel::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 124px;
+  width: 12px;
+  height: 12px;
+  border-left: 1px solid rgba(220, 190, 130, 0.48);
+  border-bottom: 1px solid rgba(220, 190, 130, 0.48);
+  background: rgba(7, 28, 24, 0.98);
+  transform: rotate(45deg);
+}
+
+.settings-tools-section {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-tools-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-tools-heading strong {
+  color: rgba(242, 247, 237, 0.94);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-tools-heading small {
+  color: rgba(126, 246, 199, 0.72);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.settings-tools-heading button {
+  height: 23px;
+  min-width: 42px;
+  padding: 0 8px;
+  color: rgba(232, 214, 164, 0.88);
+  font-family: inherit;
+  font-size: 10px;
+  border: 1px solid rgba(222, 196, 139, 0.32);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.settings-tools-heading button:hover {
+  color: rgba(5, 21, 18, 0.94);
+  background: rgba(232, 214, 164, 0.82);
+}
+
+.settings-tools-tooltip {
+  left: auto;
+  right: calc(100% + 8px);
+  width: 220px;
+  transform: translateY(-50%) translateX(3px);
+}
+
+.settings-info:hover .settings-tools-tooltip,
+.settings-info:focus .settings-tools-tooltip {
+  transform: translateY(-50%) translateX(0);
+}
+
+.settings-tools-panel input {
+  width: 100%;
+  height: 27px;
+  padding: 0 8px;
+  color: #e8d6a4;
+  font-family: inherit;
+  font-size: 10px;
+  border: 1px solid rgba(222, 196, 139, 0.28);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.18);
+  outline: none;
+}
+
+.settings-tools-panel input::placeholder {
+  color: rgba(214, 225, 210, 0.38);
+}
+
+.settings-tools-panel input:focus {
+  border-color: rgba(115, 238, 190, 0.48);
+  box-shadow: 0 0 0 1px rgba(115, 238, 190, 0.14);
+}
+
+.settings-tools-divider {
+  height: 1px;
+  margin: 11px 0 10px;
+  background: linear-gradient(90deg, transparent, rgba(222, 196, 139, 0.28), transparent);
+}
+
 .settings-position-row {
   margin-top: 9px;
-  margin-bottom: 12px;
+}
+
+.settings-startup-row {
+  margin-top: 9px;
+}
+
+.settings-diagnostics-body {
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+  padding: 8px 9px;
+  color: rgba(237, 246, 238, 0.88);
+  font-size: 11px;
+  line-height: 1.35;
+  border: 1px solid rgba(222, 196, 139, 0.18);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.settings-tools-diagnostics {
+  margin-top: 8px;
+}
+
+.settings-diagnostics-body span,
+.settings-diagnostics-body small {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-diagnostics-body strong {
+  width: 42px;
+  flex: 0 0 auto;
+  color: rgba(232, 214, 164, 0.92);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settings-diagnostics-body em {
+  min-width: 0;
+  color: rgba(228, 244, 233, 0.9);
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 0 7px rgba(126, 246, 199, 0.12);
 }
 
 .settings-row-control input:focus {

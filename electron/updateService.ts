@@ -24,7 +24,7 @@ export async function checkForUpdate(): Promise<UpdateStatus> {
   return releaseToStatus(release);
 }
 
-export async function downloadAndInstallUpdate(webContents: WebContents): Promise<UpdateStatus> {
+export async function downloadAndInstallUpdate(webContents: WebContents, downloadProxyPrefix = ""): Promise<UpdateStatus> {
   const release = await requestJson<GitHubLatestRelease>(latestReleaseApiUrl);
   const status = releaseToStatus(release);
 
@@ -43,7 +43,7 @@ export async function downloadAndInstallUpdate(webContents: WebContents): Promis
   const installerPath = path.join(updateDir, sanitizeFileName(installer.name));
 
   try {
-    await downloadFile(installer.browser_download_url, installerPath, (progress) => {
+    await downloadFile(applyDownloadProxy(installer.browser_download_url, downloadProxyPrefix), installerPath, (progress) => {
       webContents.send("updates:download-progress", progress);
     });
   } catch (error) {
@@ -61,6 +61,33 @@ export async function downloadAndInstallUpdate(webContents: WebContents): Promis
     downloading: false,
     downloadProgress: 100
   };
+}
+
+function applyDownloadProxy(url: string, proxyPrefix: string): string {
+  const prefix = normalizeProxyPrefix(proxyPrefix);
+  if (!prefix) {
+    return url;
+  }
+
+  return `${prefix}${url}`;
+}
+
+function normalizeProxyPrefix(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return "";
+    }
+
+    return url.toString().endsWith("/") ? url.toString() : `${url.toString()}/`;
+  } catch {
+    return "";
+  }
 }
 
 function releaseToStatus(release: GitHubLatestRelease): UpdateStatus {

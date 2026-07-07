@@ -27,8 +27,9 @@ const windowSizes: Record<
   large: { width: 768, collapsedHeight: 89, panelTop: 97, panelScale: 1.14 }
 };
 
-const settingsPanelHeight = 405;
+const settingsPanelHeight = 500;
 const expandedWindowPadding = 32;
+const expandedRightPadding = 230;
 const collapsedPeekHeight = 10;
 
 let currentVisualSize: VisualSize = "medium";
@@ -190,14 +191,30 @@ app.whenReady().then(() => {
   ipcMain.handle("polling:set-settings", (_event, settings: unknown) =>
     scheduler?.updatePollingSettings(normalizePollingSettings(settings ?? {})) ?? DEFAULT_POLLING_SETTINGS
   );
+  ipcMain.handle("app:get-open-at-login", () => getOpenAtLogin());
+  ipcMain.handle("app:set-open-at-login", (_event, openAtLogin: unknown) => {
+    setOpenAtLogin(openAtLogin === true);
+    return getOpenAtLogin();
+  });
+  ipcMain.handle("app:get-diagnostics", () => scheduler?.getDiagnostics() ?? null);
   ipcMain.handle("updates:check", () => checkForUpdate());
-  ipcMain.handle("updates:download-and-install", (event) => downloadAndInstallUpdate(event.sender));
+  ipcMain.handle("updates:download-and-install", async (event, downloadProxyPrefix: unknown) => {
+    const status = await downloadAndInstallUpdate(
+      event.sender,
+      typeof downloadProxyPrefix === "string" ? downloadProxyPrefix : ""
+    );
+    setTimeout(() => app.quit(), 150);
+    return status;
+  });
   ipcMain.on("app:open-external", (_event, url: unknown) => {
     if (typeof url !== "string" || !url.startsWith("https://github.com/Aecenas/CodexBar/releases")) {
       return;
     }
 
     void shell.openExternal(url);
+  });
+  ipcMain.on("app:quit", () => {
+    app.quit();
   });
 
   createTray();
@@ -229,13 +246,14 @@ function applyWindowLayout(): void {
   }
 
   const size = windowSizes[currentVisualSize];
-  const width = size.width;
-  const display = getTargetDisplay(width);
+  const barWidth = size.width;
+  const width = panelExpanded ? Math.ceil(barWidth + expandedRightPadding * size.panelScale) : barWidth;
+  const display = getTargetDisplay(barWidth);
   const height = panelExpanded ? getExpandedHeight(size) : barCollapsed ? collapsedPeekHeight : size.collapsedHeight;
   const x =
     positionAdjustmentEnabled && customWindowX !== null
-      ? clamp(customWindowX, display.workArea.x, display.workArea.x + display.workArea.width - width)
-      : Math.round(display.workArea.x + (display.workArea.width - width) / 2);
+      ? clamp(customWindowX, display.workArea.x, display.workArea.x + display.workArea.width - barWidth)
+      : Math.round(display.workArea.x + (display.workArea.width - barWidth) / 2);
   const y = display.workArea.y;
   const bounds = mainWindow.getBounds();
 
@@ -329,16 +347,8 @@ function updateTrayMenu(): void {
     return;
   }
 
-  const openAtLogin = getOpenAtLogin();
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      {
-        label: openAtLogin ? "开机启动√" : "开机启动",
-        click: () => {
-          setOpenAtLogin(!openAtLogin);
-          updateTrayMenu();
-        }
-      },
       {
         label: "退出软件",
         click: () => app.quit()

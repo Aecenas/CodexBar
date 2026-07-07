@@ -6,6 +6,8 @@ export interface QuotaUpdatePayload {
   weekRemaining: number | null;
   fiveHourResetAt: number | null;
   weekResetAt: number | null;
+  fiveHourTokensUsed: number | null;
+  weekTokensUsed: number | null;
   status: QuotaStatus;
   activity: ActivityState;
   fetchedAt: number | null;
@@ -31,6 +33,8 @@ export interface AppSettings extends PollingSettings {
   autoCollapse: boolean;
   autoUpdateCheck: boolean;
   positionAdjustment: boolean;
+  openAtLogin: boolean;
+  downloadProxyPrefix: string;
   barX: number | null;
 }
 
@@ -52,6 +56,30 @@ export interface UpdateDownloadProgress {
   percent: number | null;
 }
 
+export interface ActivityDiagnostics {
+  sessionsDir: string;
+  lastProbeAt: number | null;
+  lastSource: string;
+  lastThreadStatus: string | null;
+}
+
+export interface TokenUsageDiagnostics {
+  sessionsDir: string;
+  cachedFiles: number;
+  cachedBuckets: number;
+  lastReadAt: number | null;
+}
+
+export interface AppDiagnostics {
+  activity: ActivityState;
+  quotaStatus: QuotaStatus;
+  lastQuotaReadAt: number | null;
+  lastQuotaError: string | null;
+  lastQuotaFetchedAt: number | null;
+  activityDetector: ActivityDiagnostics;
+  tokenUsage: TokenUsageDiagnostics;
+}
+
 export interface CodexBarBridge {
   onQuotaUpdate(callback: (payload: QuotaUpdatePayload) => void): () => void;
   setPanelExpanded(expanded: boolean): void;
@@ -61,11 +89,15 @@ export interface CodexBarBridge {
   startBarDrag(screenX: number, screenY: number): void;
   moveBarDrag(screenX: number, screenY: number): void;
   endBarDrag(): Promise<number | null>;
+  quitApp(): void;
   setVisualSize(visualSize: VisualSize): void;
+  getOpenAtLogin(): Promise<boolean>;
+  setOpenAtLogin(openAtLogin: boolean): Promise<boolean>;
+  getDiagnostics(): Promise<AppDiagnostics | null>;
   getPollingSettings(): Promise<PollingSettings>;
   setPollingSettings(settings: PollingSettings): Promise<PollingSettings>;
   checkForUpdates(): Promise<UpdateStatus>;
-  downloadAndInstallUpdate(): Promise<UpdateStatus>;
+  downloadAndInstallUpdate(downloadProxyPrefix?: string): Promise<UpdateStatus>;
   onUpdateDownloadProgress(callback: (progress: UpdateDownloadProgress) => void): () => void;
   openExternal(url: string): void;
 }

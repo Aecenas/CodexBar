@@ -1,13 +1,16 @@
 import type { BrowserWindow } from "electron";
 import type { CodexActivityDetector } from "./codexActivityDetector.js";
 import type { CodexAppServerClient } from "./codexAppServerClient.js";
-import type { ActivityState, PollingSettings, QuotaUpdatePayload, RateLimitSnapshot } from "./types.js";
+import type { ActivityState, AppDiagnostics, PollingSettings, QuotaUpdatePayload, RateLimitSnapshot } from "./types.js";
 import { DEFAULT_POLLING_SETTINGS, normalizePollingSettings } from "./pollingSettings.js";
+import { TokenUsageReader, type TokenUsageSnapshot } from "./tokenUsageReader.js";
 
 export class RefreshScheduler {
   private activity: ActivityState = "unknown";
   private lastSnapshot: RateLimitSnapshot | null = null;
+  private lastTokenUsage: TokenUsageSnapshot | null = null;
   private lastStatus: QuotaUpdatePayload["status"] = "loading";
+  private lastQuotaError: string | null = null;
   private lastQuotaReadAt = 0;
   private activityTimer: NodeJS.Timeout | null = null;
   private quotaTimer: NodeJS.Timeout | null = null;
@@ -17,7 +20,8 @@ export class RefreshScheduler {
   constructor(
     private readonly window: BrowserWindow,
     private readonly rateLimitClient: CodexAppServerClient,
-    private readonly activityDetector: CodexActivityDetector
+    private readonly activityDetector: CodexActivityDetector,
+    private readonly tokenUsageReader = new TokenUsageReader()
   ) {}
 
   start(): void {
@@ -31,6 +35,8 @@ export class RefreshScheduler {
       weekRemaining: null,
       fiveHourResetAt: null,
       weekResetAt: null,
+      fiveHourTokensUsed: null,
+      weekTokensUsed: null,
       status: "loading",
       activity: this.activity,
       fetchedAt: null
@@ -87,25 +93,30 @@ export class RefreshScheduler {
 
     try {
       const snapshot = await this.rateLimitClient.readRateLimits();
+      const tokenUsage = await this.readTokenUsage();
       this.lastSnapshot = snapshot;
       this.lastQuotaReadAt = Date.now();
       this.lastStatus = "ready";
-      this.push(this.toPayload(snapshot, "ready"));
+      this.lastQuotaError = null;
+      this.push(this.toPayload(snapshot, "ready", tokenUsage));
     } catch (error) {
       this.lastStatus = this.lastSnapshot ? "stale" : "error";
+      this.lastQuotaError = error instanceof Error ? error.message : "Failed to read Codex quota.";
       this.push({
         ...(this.lastSnapshot
-          ? this.toPayload(this.lastSnapshot, "stale")
+          ? this.toPayload(this.lastSnapshot, "stale", this.lastTokenUsage)
           : {
               fiveHourRemaining: null,
               weekRemaining: null,
               fiveHourResetAt: null,
               weekResetAt: null,
+              fiveHourTokensUsed: this.lastTokenUsage?.fiveHourTokensUsed ?? null,
+              weekTokensUsed: this.lastTokenUsage?.weekTokensUsed ?? null,
               status: "error" as const,
               activity: this.activity,
               fetchedAt: null
             }),
-        error: error instanceof Error ? error.message : "Failed to read Codex quota."
+        error: this.lastQuotaError
       });
     }
 
@@ -145,12 +156,28 @@ export class RefreshScheduler {
     );
   }
 
-  private toPayload(snapshot: RateLimitSnapshot, status: QuotaUpdatePayload["status"]): QuotaUpdatePayload {
+  private async readTokenUsage(): Promise<TokenUsageSnapshot | null> {
+    try {
+      this.lastTokenUsage = await this.tokenUsageReader.readUsage();
+    } catch {
+      // Token usage is advisory; quota percentages should not depend on local JSONL parsing.
+    }
+
+    return this.lastTokenUsage;
+  }
+
+  private toPayload(
+    snapshot: RateLimitSnapshot,
+    status: QuotaUpdatePayload["status"],
+    tokenUsage: TokenUsageSnapshot | null
+  ): QuotaUpdatePayload {
     return {
       fiveHourRemaining: snapshot.fiveHour.remainingPercent,
       weekRemaining: snapshot.week.remainingPercent,
       fiveHourResetAt: snapshot.fiveHour.resetsAt,
       weekResetAt: snapshot.week.resetsAt,
+      fiveHourTokensUsed: tokenUsage?.fiveHourTokensUsed ?? null,
+      weekTokensUsed: tokenUsage?.weekTokensUsed ?? null,
       status,
       activity: this.activity,
       fetchedAt: snapshot.fetchedAt
@@ -165,7 +192,7 @@ export class RefreshScheduler {
 
   private pushCurrentState(): void {
     if (this.lastSnapshot) {
-      this.push(this.toPayload(this.lastSnapshot, this.lastStatus));
+      this.push(this.toPayload(this.lastSnapshot, this.lastStatus, this.lastTokenUsage));
       return;
     }
 
@@ -174,9 +201,23 @@ export class RefreshScheduler {
       weekRemaining: null,
       fiveHourResetAt: null,
       weekResetAt: null,
+      fiveHourTokensUsed: this.lastTokenUsage?.fiveHourTokensUsed ?? null,
+      weekTokensUsed: this.lastTokenUsage?.weekTokensUsed ?? null,
       status: this.lastStatus,
       activity: this.activity,
       fetchedAt: null
     });
+  }
+
+  getDiagnostics(): AppDiagnostics {
+    return {
+      activity: this.activity,
+      quotaStatus: this.lastStatus,
+      lastQuotaReadAt: this.lastQuotaReadAt === 0 ? null : this.lastQuotaReadAt,
+      lastQuotaError: this.lastQuotaError,
+      lastQuotaFetchedAt: this.lastSnapshot?.fetchedAt ?? null,
+      activityDetector: this.activityDetector.getDiagnostics(),
+      tokenUsage: this.tokenUsageReader.getDiagnostics()
+    };
   }
 }

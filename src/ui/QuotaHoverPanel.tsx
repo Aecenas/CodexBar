@@ -6,6 +6,7 @@ type PanelKind = "fiveHour" | "week";
 interface QuotaHoverPanelProps {
   kind: PanelKind;
   resetAt: number | null;
+  tokensUsed: number | null;
   history: QuotaHistoryPoint[];
   onPointerEnter: () => void;
   onPointerLeave: () => void;
@@ -18,6 +19,7 @@ const HOUR_MS = 60 * 60 * 1000;
 export function QuotaHoverPanel({
   kind,
   resetAt,
+  tokensUsed,
   history,
   onPointerEnter,
   onPointerLeave
@@ -55,7 +57,10 @@ export function QuotaHoverPanel({
       aria-label={`${label} quota details`}
     >
       <div className="quota-panel-header">
-        <span>{label}</span>
+        <span className="quota-panel-title">
+          <span>{label}</span>
+          <small>{formatTokenUsage(tokensUsed)}</small>
+        </span>
         <strong>{formatCountdown(resetAt, now)}</strong>
       </div>
       <canvas ref={canvasRef} className="quota-curve" width={358} height={136} />
@@ -215,6 +220,39 @@ function formatCountdown(resetAt: number | null, now: number): string {
   }
 
   return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
+
+function formatTokenUsage(tokensUsed: number | null): string {
+  if (tokensUsed === null) {
+    return "-- token";
+  }
+
+  const value = Math.max(0, tokensUsed);
+  if (value >= 1_000_000_000) {
+    return `${formatCompactNumber(value / 1_000_000_000)}G token`;
+  }
+
+  if (value >= 1_000_000) {
+    return `${formatCompactNumber(value / 1_000_000)}M token`;
+  }
+
+  if (value >= 1_000) {
+    return `${formatCompactNumber(value / 1_000)}K token`;
+  }
+
+  return `${Math.round(value)} token`;
+}
+
+function formatCompactNumber(value: number): string {
+  if (value >= 100) {
+    return Math.round(value).toString();
+  }
+
+  if (value >= 10) {
+    return value.toFixed(1).replace(/\.0$/, "");
+  }
+
+  return value.toFixed(2).replace(/0$/, "").replace(/\.0$/, "");
 }
 
 function pad(value: number): string {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AppSettings, UpdateStatus, VisualSize } from "../types";
+import type { AppDiagnostics, AppSettings, UpdateStatus, VisualSize } from "../types";
 import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_POLLING_SETTINGS,
@@ -68,10 +68,17 @@ export function SettingsHoverPanel({
     createDraftValues(settings)
   );
   const [upgradeHint, setUpgradeHint] = useState<string | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<AppDiagnostics | null>(null);
+  const [downloadProxyDraft, setDownloadProxyDraft] = useState(settings.downloadProxyPrefix);
 
   useEffect(() => {
     setDraftValues(createDraftValues(settings));
   }, [settings.activityCheckSeconds, settings.busyQuotaSeconds, settings.idleQuotaSeconds]);
+
+  useEffect(() => {
+    setDownloadProxyDraft(settings.downloadProxyPrefix);
+  }, [settings.downloadProxyPrefix]);
 
   useEffect(() => {
     void onCheckForUpdates();
@@ -129,6 +136,12 @@ export function SettingsHoverPanel({
     onChange(normalizeAppSettings({ ...settings, autoUpdateCheck }));
   }
 
+  function commitDownloadProxy(value: string): void {
+    const next = normalizeAppSettings({ ...settings, downloadProxyPrefix: value });
+    setDownloadProxyDraft(next.downloadProxyPrefix);
+    onChange(next);
+  }
+
   function updatePositionAdjustment(positionAdjustment: boolean): void {
     onChange(
       normalizeAppSettings({
@@ -137,6 +150,10 @@ export function SettingsHoverPanel({
         barX: positionAdjustment ? settings.barX : null
       })
     );
+  }
+
+  function updateOpenAtLogin(openAtLogin: boolean): void {
+    onChange(normalizeAppSettings({ ...settings, openAtLogin }));
   }
 
   async function handleUpgradeClick(): Promise<void> {
@@ -152,6 +169,10 @@ export function SettingsHoverPanel({
     }
 
     setUpgradeHint("已是最新");
+  }
+
+  async function refreshDiagnostics(): Promise<void> {
+    setDiagnostics((await window.codexBar?.getDiagnostics()) ?? null);
   }
 
   return (
@@ -286,6 +307,97 @@ export function SettingsHoverPanel({
           onChange={(event) => updateAutoUpdateCheck(event.target.checked)}
         />
       </label>
+      <div
+        className={`settings-tools-row ${toolsOpen ? "active" : ""}`}
+        onPointerEnter={() => {
+          setToolsOpen(true);
+          void refreshDiagnostics();
+        }}
+        onPointerLeave={() => setToolsOpen(false)}
+        onMouseEnter={() => {
+          setToolsOpen(true);
+          void refreshDiagnostics();
+        }}
+        onMouseLeave={() => setToolsOpen(false)}
+      >
+        <span className="settings-row-title">
+          <strong>代理与诊断</strong>
+          <span
+            className="settings-info"
+            tabIndex={0}
+            aria-label="设置 GitHub Release 下载代理，并查看 Codex 连接、额度读取和本地 session 解析状态。"
+          >
+            i
+            <span className="settings-tooltip">
+              设置 GitHub Release 下载代理，并查看 Codex 连接、额度读取和本地 session 解析状态。
+            </span>
+          </span>
+        </span>
+        <span className="settings-tools-summary">
+          {settings.downloadProxyPrefix ? "已设代理" : "直连"} / {diagnostics ? "已诊断" : "待诊断"}
+        </span>
+        <span className="settings-tools-arrow">›</span>
+        {toolsOpen ? (
+          <div className="settings-tools-panel">
+            <div className="settings-tools-section">
+              <div className="settings-tools-heading">
+                <span className="settings-row-title">
+                  <strong>下载代理</strong>
+                  <span
+                    className="settings-info"
+                    tabIndex={0}
+                    aria-label="填写一个会把后面的完整 GitHub 下载地址作为路径继续转发的代理前缀，例如 https://gh-proxy.example.com/。留空表示直接下载。"
+                  >
+                    i
+                    <span className="settings-tooltip settings-tools-tooltip">
+                      填写一个会把后面的完整 GitHub 下载地址作为路径继续转发的代理前缀，例如
+                      https://gh-proxy.example.com/。留空表示直接下载。
+                    </span>
+                  </span>
+                </span>
+                <small>{settings.downloadProxyPrefix ? "已启用" : "直连 GitHub"}</small>
+              </div>
+              <input
+                type="text"
+                value={downloadProxyDraft}
+                placeholder="留空直连"
+                onChange={(event) => setDownloadProxyDraft(event.target.value)}
+                onBlur={(event) => commitDownloadProxy(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+            </div>
+            <div className="settings-tools-divider" />
+            <div className="settings-tools-heading">
+              <strong>运行诊断</strong>
+              <button type="button" onClick={() => void refreshDiagnostics()}>
+                刷新
+              </button>
+            </div>
+            <div className="settings-diagnostics-body settings-tools-diagnostics">
+              <span>
+                <strong>线程</strong>
+                <em>{formatActivityDiagnostics(diagnostics)}</em>
+              </span>
+              <span>
+                <strong>额度</strong>
+                <em>{formatQuotaDiagnostics(diagnostics)}</em>
+              </span>
+              <span>
+                <strong>记录</strong>
+                <em>{formatTokenDiagnostics(diagnostics)}</em>
+              </span>
+              <small title={diagnostics?.activityDetector.sessionsDir ?? ""}>
+                <strong>session</strong>
+                <em>{shortenPath(diagnostics?.activityDetector.sessionsDir)}</em>
+              </small>
+            </div>
+          </div>
+        ) : null}
+      </div>
       <label className="settings-extra-row settings-position-row">
         <span className="settings-row-title">
           <strong>位置调整</strong>
@@ -305,6 +417,21 @@ export function SettingsHoverPanel({
           type="checkbox"
           checked={settings.positionAdjustment}
           onChange={(event) => updatePositionAdjustment(event.target.checked)}
+        />
+      </label>
+      <label className="settings-extra-row settings-startup-row">
+        <span className="settings-row-title">
+          <strong>开机启动</strong>
+          <span className="settings-info" tabIndex={0} aria-label="开启后，登录 Windows 时自动启动 CodexBar。">
+            i
+            <span className="settings-tooltip">开启后，登录 Windows 时自动启动 CodexBar。</span>
+          </span>
+        </span>
+        <input
+          className="settings-toggle"
+          type="checkbox"
+          checked={settings.openAtLogin}
+          onChange={(event) => updateOpenAtLogin(event.target.checked)}
         />
       </label>
     </aside>
@@ -349,4 +476,72 @@ function getUpgradeHint(updateStatus: UpdateStatus, upgradeHint: string | null):
   }
 
   return upgradeHint ?? "";
+}
+
+function formatActivityDiagnostics(diagnostics: AppDiagnostics | null): string {
+  if (!diagnostics) {
+    return "未读取";
+  }
+
+  return `${translateActivity(diagnostics.activity)} / ${diagnostics.activityDetector.lastSource}`;
+}
+
+function formatQuotaDiagnostics(diagnostics: AppDiagnostics | null): string {
+  if (!diagnostics) {
+    return "未读取";
+  }
+
+  if (diagnostics.lastQuotaError) {
+    return `异常 / ${diagnostics.lastQuotaError}`;
+  }
+
+  return `${diagnostics.quotaStatus} / ${formatRelativeTime(diagnostics.lastQuotaReadAt)}`;
+}
+
+function formatTokenDiagnostics(diagnostics: AppDiagnostics | null): string {
+  if (!diagnostics) {
+    return "未读取";
+  }
+
+  return `${diagnostics.tokenUsage.cachedFiles} 文件 / ${diagnostics.tokenUsage.cachedBuckets} 分钟桶`;
+}
+
+function translateActivity(activity: AppDiagnostics["activity"]): string {
+  if (activity === "busy") {
+    return "活跃";
+  }
+
+  if (activity === "idle") {
+    return "空闲";
+  }
+
+  return "未知";
+}
+
+function formatRelativeTime(timestamp: number | null): string {
+  if (!timestamp) {
+    return "暂无";
+  }
+
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) {
+    return `${seconds}秒前`;
+  }
+
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}分钟前`;
+  }
+
+  return `${Math.round(minutes / 60)}小时前`;
+}
+
+function shortenPath(value: string | undefined): string {
+  if (!value) {
+    return "未读取";
+  }
+
+  const normalized = value.replaceAll("\\", "/");
+  const parts = normalized.split("/");
+  return parts.length <= 3 ? value : `.../${parts.slice(-3).join("/")}`;
 }

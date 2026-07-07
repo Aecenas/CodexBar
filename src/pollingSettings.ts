@@ -18,6 +18,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoCollapse: false,
   autoUpdateCheck: true,
   positionAdjustment: false,
+  openAtLogin: false,
+  downloadProxyPrefix: "",
   barX: null
 };
 
@@ -54,11 +56,35 @@ export function normalizeAppSettings(settings: Partial<AppSettings>): AppSetting
     autoCollapse: settings.autoCollapse === true,
     autoUpdateCheck: settings.autoUpdateCheck !== false,
     positionAdjustment: settings.positionAdjustment === true,
+    openAtLogin: settings.openAtLogin === true,
+    downloadProxyPrefix: normalizeDownloadProxyPrefix(settings.downloadProxyPrefix),
     barX:
       settings.positionAdjustment === true && typeof settings.barX === "number" && Number.isFinite(settings.barX)
         ? Math.round(settings.barX)
         : null
   };
+}
+
+function normalizeDownloadProxyPrefix(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      return "";
+    }
+
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 function clampSetting(value: unknown, min: number, fallback: number): number {
