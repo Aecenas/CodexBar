@@ -16,7 +16,11 @@
   </p>
 </div>
 
-![CodexBar preview](docs/images/codexbar-preview.png)
+<div align="center">
+  <img src="docs/images/codexbar-preview-main.png" alt="CodexBar desktop preview" />
+  <br />
+  <img src="docs/images/codexbar-preview-settings.png" alt="CodexBar settings preview" />
+</div>
 
 ---
 
