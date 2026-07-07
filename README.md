@@ -85,7 +85,7 @@ The Windows executable, shortcuts, and tray icon all use the generated CodexBar 
 
 ## Release
 
-Version `v0.3.1` tightens update-badge rules: the red dot only appears after a fresh GitHub version comparison, checks run on launch and when reopening the Codex settings panel, and collapsed transparent pixels can click through.
+Version `v0.3.5` adds optional position adjustment: drag the bar from opaque pixels when enabled, then release to snap it back to the top of the current screen while preserving the horizontal position.
 
 Public builds are currently unsigned, so Windows may show an unknown-publisher warning during installation.
 

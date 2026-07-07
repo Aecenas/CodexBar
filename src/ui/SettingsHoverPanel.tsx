@@ -129,6 +129,16 @@ export function SettingsHoverPanel({
     onChange(normalizeAppSettings({ ...settings, autoUpdateCheck }));
   }
 
+  function updatePositionAdjustment(positionAdjustment: boolean): void {
+    onChange(
+      normalizeAppSettings({
+        ...settings,
+        positionAdjustment,
+        barX: positionAdjustment ? settings.barX : null
+      })
+    );
+  }
+
   async function handleUpgradeClick(): Promise<void> {
     const next = await onUpgrade();
 
@@ -274,6 +284,27 @@ export function SettingsHoverPanel({
           type="checkbox"
           checked={settings.autoUpdateCheck}
           onChange={(event) => updateAutoUpdateCheck(event.target.checked)}
+        />
+      </label>
+      <label className="settings-extra-row settings-position-row">
+        <span className="settings-row-title">
+          <strong>位置调整</strong>
+          <span
+            className="settings-info"
+            tabIndex={0}
+            aria-label="开启后，可按住 bar 的不透明区域拖动横向位置；松手后自动吸附到屏幕顶部。"
+          >
+            i
+            <span className="settings-tooltip">
+              开启后，可按住 bar 的不透明区域拖动横向位置；松手后自动吸附到屏幕顶部。
+            </span>
+          </span>
+        </span>
+        <input
+          className="settings-toggle"
+          type="checkbox"
+          checked={settings.positionAdjustment}
+          onChange={(event) => updatePositionAdjustment(event.target.checked)}
         />
       </label>
     </aside>

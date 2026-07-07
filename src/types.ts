@@ -30,6 +30,8 @@ export interface AppSettings extends PollingSettings {
   visualSize: VisualSize;
   autoCollapse: boolean;
   autoUpdateCheck: boolean;
+  positionAdjustment: boolean;
+  barX: number | null;
 }
 
 export interface UpdateStatus {
@@ -55,6 +57,10 @@ export interface CodexBarBridge {
   setPanelExpanded(expanded: boolean): void;
   setBarCollapsed(collapsed: boolean): void;
   setMousePassthrough(passthrough: boolean): void;
+  setBarPositioning(enabled: boolean, x: number | null): void;
+  startBarDrag(screenX: number, screenY: number): void;
+  moveBarDrag(screenX: number, screenY: number): void;
+  endBarDrag(): Promise<number | null>;
   setVisualSize(visualSize: VisualSize): void;
   getPollingSettings(): Promise<PollingSettings>;
   setPollingSettings(settings: PollingSettings): Promise<PollingSettings>;

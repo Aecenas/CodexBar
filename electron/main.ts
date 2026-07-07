@@ -27,7 +27,7 @@ const windowSizes: Record<
   large: { width: 768, collapsedHeight: 89, panelTop: 97, panelScale: 1.14 }
 };
 
-const settingsPanelHeight = 370;
+const settingsPanelHeight = 405;
 const expandedWindowPadding = 32;
 const collapsedPeekHeight = 10;
 
@@ -35,6 +35,9 @@ let currentVisualSize: VisualSize = "medium";
 let panelExpanded = false;
 let barCollapsed = false;
 let mousePassthrough = false;
+let positionAdjustmentEnabled = false;
+let customWindowX: number | null = null;
+let dragState: { startMouseX: number; startMouseY: number; startBounds: Electron.Rectangle } | null = null;
 
 function createWindow(): void {
   const display = screen.getPrimaryDisplay();
@@ -116,6 +119,64 @@ app.whenReady().then(() => {
     setMousePassthrough(passthrough);
   });
 
+  ipcMain.on("bar:set-positioning", (_event, payload: unknown) => {
+    const next = normalizePositioningPayload(payload);
+    positionAdjustmentEnabled = next.enabled;
+    customWindowX = next.enabled ? next.x : null;
+    applyWindowLayout();
+  });
+
+  ipcMain.on("bar:drag-start", (_event, payload: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed() || !positionAdjustmentEnabled || barCollapsed) {
+      return;
+    }
+
+    const point = normalizeScreenPoint(payload);
+    if (!point) {
+      return;
+    }
+
+    setMousePassthrough(false);
+    dragState = {
+      startMouseX: point.screenX,
+      startMouseY: point.screenY,
+      startBounds: mainWindow.getBounds()
+    };
+  });
+
+  ipcMain.on("bar:drag-move", (_event, payload: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed() || !dragState) {
+      return;
+    }
+
+    const point = normalizeScreenPoint(payload);
+    if (!point) {
+      return;
+    }
+
+    const x = Math.round(dragState.startBounds.x + point.screenX - dragState.startMouseX);
+    const y = Math.round(dragState.startBounds.y + point.screenY - dragState.startMouseY);
+    mainWindow.setBounds({ ...mainWindow.getBounds(), x, y }, false);
+  });
+
+  ipcMain.handle("bar:drag-end", () => {
+    if (!mainWindow || mainWindow.isDestroyed() || !dragState) {
+      dragState = null;
+      return customWindowX;
+    }
+
+    dragState = null;
+    const bounds = mainWindow.getBounds();
+    const size = windowSizes[currentVisualSize];
+    const display = screen.getDisplayNearestPoint({
+      x: bounds.x + Math.round(bounds.width / 2),
+      y: bounds.y + Math.round(bounds.height / 2)
+    });
+    customWindowX = clamp(bounds.x, display.workArea.x, display.workArea.x + display.workArea.width - size.width);
+    applyWindowLayout();
+    return customWindowX;
+  });
+
   ipcMain.on("panel:set-visual-size", (_event, visualSize: VisualSize) => {
     if (visualSize !== "small" && visualSize !== "medium" && visualSize !== "large") {
       return;
@@ -167,17 +228,35 @@ function applyWindowLayout(): void {
     return;
   }
 
-  const display = screen.getPrimaryDisplay();
   const size = windowSizes[currentVisualSize];
   const width = size.width;
+  const display = getTargetDisplay(width);
   const height = panelExpanded ? getExpandedHeight(size) : barCollapsed ? collapsedPeekHeight : size.collapsedHeight;
-  const x = Math.round(display.workArea.x + (display.workArea.width - width) / 2);
+  const x =
+    positionAdjustmentEnabled && customWindowX !== null
+      ? clamp(customWindowX, display.workArea.x, display.workArea.x + display.workArea.width - width)
+      : Math.round(display.workArea.x + (display.workArea.width - width) / 2);
   const y = display.workArea.y;
   const bounds = mainWindow.getBounds();
+
+  if (positionAdjustmentEnabled && customWindowX !== null && customWindowX !== x) {
+    customWindowX = x;
+  }
 
   if (bounds.width !== width || bounds.height !== height || bounds.x !== x || bounds.y !== y) {
     mainWindow.setBounds({ ...bounds, x, y, width, height }, false);
   }
+}
+
+function getTargetDisplay(width: number): Electron.Display {
+  if (!positionAdjustmentEnabled || customWindowX === null) {
+    return screen.getPrimaryDisplay();
+  }
+
+  return screen.getDisplayNearestPoint({
+    x: customWindowX + Math.round(width / 2),
+    y: screen.getPrimaryDisplay().workArea.y
+  });
 }
 
 function setMousePassthrough(passthrough: boolean): void {
@@ -191,6 +270,42 @@ function setMousePassthrough(passthrough: boolean): void {
 
 function getExpandedHeight(size: { panelTop: number; panelScale: number }): number {
   return Math.ceil(size.panelTop + settingsPanelHeight * size.panelScale + expandedWindowPadding);
+}
+
+function normalizePositioningPayload(payload: unknown): { enabled: boolean; x: number | null } {
+  if (!payload || typeof payload !== "object") {
+    return { enabled: false, x: null };
+  }
+
+  const value = payload as { enabled?: unknown; x?: unknown };
+  return {
+    enabled: value.enabled === true,
+    x: typeof value.x === "number" && Number.isFinite(value.x) ? Math.round(value.x) : null
+  };
+}
+
+function normalizeScreenPoint(payload: unknown): { screenX: number; screenY: number } | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const value = payload as { screenX?: unknown; screenY?: unknown };
+  if (typeof value.screenX !== "number" || !Number.isFinite(value.screenX)) {
+    return null;
+  }
+
+  if (typeof value.screenY !== "number" || !Number.isFinite(value.screenY)) {
+    return null;
+  }
+
+  return {
+    screenX: value.screenX,
+    screenY: value.screenY
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function createTray(): void {

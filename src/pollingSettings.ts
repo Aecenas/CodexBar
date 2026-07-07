@@ -16,7 +16,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   ...DEFAULT_POLLING_SETTINGS,
   visualSize: "medium",
   autoCollapse: false,
-  autoUpdateCheck: true
+  autoUpdateCheck: true,
+  positionAdjustment: false,
+  barX: null
 };
 
 export function normalizePollingSettings(settings: Partial<PollingSettings>): PollingSettings {
@@ -50,7 +52,12 @@ export function normalizeAppSettings(settings: Partial<AppSettings>): AppSetting
     ...polling,
     visualSize,
     autoCollapse: settings.autoCollapse === true,
-    autoUpdateCheck: settings.autoUpdateCheck !== false
+    autoUpdateCheck: settings.autoUpdateCheck !== false,
+    positionAdjustment: settings.positionAdjustment === true,
+    barX:
+      settings.positionAdjustment === true && typeof settings.barX === "number" && Number.isFinite(settings.barX)
+        ? Math.round(settings.barX)
+        : null
   };
 }
 

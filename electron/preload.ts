@@ -16,6 +16,18 @@ contextBridge.exposeInMainWorld("codexBar", {
   setMousePassthrough(passthrough: boolean) {
     ipcRenderer.send("bar:set-mouse-passthrough", passthrough);
   },
+  setBarPositioning(enabled: boolean, x: number | null) {
+    ipcRenderer.send("bar:set-positioning", { enabled, x });
+  },
+  startBarDrag(screenX: number, screenY: number) {
+    ipcRenderer.send("bar:drag-start", { screenX, screenY });
+  },
+  moveBarDrag(screenX: number, screenY: number) {
+    ipcRenderer.send("bar:drag-move", { screenX, screenY });
+  },
+  endBarDrag() {
+    return ipcRenderer.invoke("bar:drag-end") as Promise<number | null>;
+  },
   setVisualSize(visualSize: VisualSize) {
     ipcRenderer.send("panel:set-visual-size", visualSize);
   },

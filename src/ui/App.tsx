@@ -54,6 +54,7 @@ export function App() {
     const pollingSettings = pickPollingSettings(appSettings);
     void window.codexBar?.setPollingSettings(pollingSettings);
     window.codexBar?.setVisualSize(appSettings.visualSize);
+    window.codexBar?.setBarPositioning(appSettings.positionAdjustment, appSettings.barX);
   }, [appSettings]);
 
   useEffect(() => {

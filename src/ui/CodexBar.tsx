@@ -44,6 +44,7 @@ export function CodexBar({
   const collapseImmediatelyAfterPanelClose = useRef(false);
   const barAlphaContext = useRef<CanvasRenderingContext2D | null>(null);
   const mousePassthrough = useRef(false);
+  const dragPointerId = useRef<number | null>(null);
   const stateLabel = quota.status === "ready" ? "Online" : quota.status === "loading" ? "Loading" : "Stale";
   const collapsed = appSettings.autoCollapse && !autoRevealed && activePanel === null;
 
@@ -219,6 +220,11 @@ export function CodexBar({
   }
 
   function handlePointerMove(event: ReactPointerEvent<HTMLElement> | ReactMouseEvent<HTMLElement>): void {
+    if (dragPointerId.current !== null) {
+      window.codexBar?.moveBarDrag(event.screenX, event.screenY);
+      return;
+    }
+
     const passthrough = updateMousePassthrough(event);
     if (collapsed && !passthrough) {
       revealForPointer();
@@ -226,8 +232,54 @@ export function CodexBar({
   }
 
   function handlePointerLeave(): void {
+    if (dragPointerId.current !== null) {
+      return;
+    }
+
     setMousePassthrough(false);
     scheduleAutoCollapse();
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLElement>): void {
+    if (!appSettings.positionAdjustment || collapsed || event.button !== 0 || isInteractiveTarget(event.target)) {
+      return;
+    }
+
+    const passthrough = updateMousePassthrough(event);
+    if (passthrough) {
+      return;
+    }
+
+    if (hideTimer.current !== null) {
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    clearCollapseTimer();
+    setActivePanel(null);
+    setMousePassthrough(false);
+    dragPointerId.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    window.codexBar?.startBarDrag(event.screenX, event.screenY);
+    event.preventDefault();
+  }
+
+  async function finishPointerDrag(event: ReactPointerEvent<HTMLElement>): Promise<void> {
+    if (dragPointerId.current !== event.pointerId) {
+      return;
+    }
+
+    dragPointerId.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const nextX = await window.codexBar?.endBarDrag();
+    if (typeof nextX === "number" && Number.isFinite(nextX)) {
+      onAppSettingsChange({
+        ...appSettings,
+        barX: nextX
+      });
+    }
   }
 
   return (
@@ -238,6 +290,9 @@ export function CodexBar({
       aria-label="Codex usage status"
       onPointerEnter={handlePointerEnter}
       onPointerMove={handlePointerMove}
+      onPointerDown={handlePointerDown}
+      onPointerUp={(event) => void finishPointerDrag(event)}
+      onPointerCancel={(event) => void finishPointerDrag(event)}
       onPointerLeave={handlePointerLeave}
       onMouseEnter={handlePointerEnter}
       onMouseMove={handlePointerMove}
@@ -314,5 +369,12 @@ export function CodexBar({
         />
       ) : null}
     </main>
+  );
+}
+
+function isInteractiveTarget(target: EventTarget): boolean {
+  return (
+    target instanceof Element &&
+    target.closest(".quota-panel, .settings-panel, button, input, textarea, select, a") !== null
   );
 }
