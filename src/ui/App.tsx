@@ -25,6 +25,9 @@ const APP_SETTINGS_STORAGE_KEY = "codexbar:appSettings:v1";
 const POLLING_SETTINGS_STORAGE_KEY = "codexbar:pollingSettings:v1";
 const UPDATE_STATUS_STORAGE_KEY = "codexbar:updateStatus:v1";
 const HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const HISTORY_RECENT_DETAIL_MS = 5 * 60 * 60 * 1000;
+const HISTORY_RECENT_BUCKET_MS = 60 * 1000;
+const HISTORY_OLDER_BUCKET_MS = 15 * 60 * 1000;
 
 export function App() {
   const [quota, setQuota] = useState<QuotaUpdatePayload>(initialPayload);
@@ -253,9 +256,7 @@ function updateHistory(current: QuotaHistoryPoint[], payload: QuotaUpdatePayload
     fiveHourRemaining: payload.fiveHourRemaining,
     weekRemaining: payload.weekRemaining
   };
-  const next = [...current, point]
-    .filter((entry) => point.at - entry.at <= HISTORY_RETENTION_MS)
-    .slice(-1200);
+  const next = compactHistory([...current, point], point.at);
 
   try {
     window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(next));
@@ -264,6 +265,25 @@ function updateHistory(current: QuotaHistoryPoint[], payload: QuotaUpdatePayload
   }
 
   return next;
+}
+
+function compactHistory(history: QuotaHistoryPoint[], now: number): QuotaHistoryPoint[] {
+  const buckets = new Map<string, QuotaHistoryPoint>();
+  const recentStart = now - HISTORY_RECENT_DETAIL_MS;
+  const earliest = now - HISTORY_RETENTION_MS;
+  const latest = now + 60_000;
+
+  for (const entry of history) {
+    if (entry.at < earliest || entry.at > latest) {
+      continue;
+    }
+
+    const bucketMs = entry.at >= recentStart ? HISTORY_RECENT_BUCKET_MS : HISTORY_OLDER_BUCKET_MS;
+    const bucketAt = Math.floor(entry.at / bucketMs) * bucketMs;
+    buckets.set(`${bucketMs}:${bucketAt}`, entry);
+  }
+
+  return Array.from(buckets.values()).sort((a, b) => a.at - b.at);
 }
 
 function isHistoryPoint(value: QuotaHistoryPoint): value is QuotaHistoryPoint {
