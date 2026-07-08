@@ -31,6 +31,7 @@ const settingsPanelHeight = 500;
 const expandedWindowPadding = 32;
 const expandedRightPadding = 230;
 const collapsedPeekHeight = 10;
+const transparentAlphaThreshold = 12;
 
 let currentVisualSize: VisualSize = "medium";
 let panelExpanded = false;
@@ -39,6 +40,7 @@ let mousePassthrough = false;
 let positionAdjustmentEnabled = false;
 let customWindowX: number | null = null;
 let dragState: { startMouseX: number; startMouseY: number; startBounds: Electron.Rectangle } | null = null;
+const collapsedShapeCache = new Map<string, Electron.Rectangle[]>();
 
 function createWindow(): void {
   const display = screen.getPrimaryDisplay();
@@ -264,6 +266,8 @@ function applyWindowLayout(): void {
   if (bounds.width !== width || bounds.height !== height || bounds.x !== x || bounds.y !== y) {
     mainWindow.setBounds({ ...bounds, x, y, width, height }, false);
   }
+
+  applyWindowShape(width, size.collapsedHeight);
 }
 
 function getTargetDisplay(width: number): Electron.Display {
@@ -284,6 +288,87 @@ function setMousePassthrough(passthrough: boolean): void {
 
   mousePassthrough = passthrough;
   mainWindow.setIgnoreMouseEvents(passthrough, { forward: true });
+}
+
+function applyWindowShape(width: number, scaledBarHeight: number): void {
+  if (!mainWindow || mainWindow.isDestroyed() || (process.platform !== "win32" && process.platform !== "linux")) {
+    return;
+  }
+
+  if (barCollapsed && !panelExpanded) {
+    mainWindow.setShape(getCollapsedShape(width, scaledBarHeight));
+    return;
+  }
+
+  mainWindow.setShape([]);
+}
+
+function getCollapsedShape(width: number, scaledBarHeight: number): Electron.Rectangle[] {
+  const cacheKey = `${width}x${scaledBarHeight}`;
+  const cached = collapsedShapeCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const scaledBar = nativeImage.createFromPath(getAssetPath("background.png")).resize({
+    width,
+    height: scaledBarHeight,
+    quality: "best"
+  });
+  const bitmap = scaledBar.toBitmap();
+  const bytesPerPixel = 4;
+  const shape: Electron.Rectangle[] = [];
+  const lastRunByKey = new Map<string, Electron.Rectangle>();
+  const sampleTop = Math.max(0, scaledBarHeight - collapsedPeekHeight);
+
+  for (let y = 0; y < collapsedPeekHeight; y += 1) {
+    const sampleY = sampleTop + y;
+    let runStart: number | null = null;
+
+    for (let x = 0; x <= width; x += 1) {
+      const alpha =
+        x < width && sampleY < scaledBarHeight
+          ? bitmap[(sampleY * width + x) * bytesPerPixel + 3]
+          : 0;
+      const opaque = alpha > transparentAlphaThreshold;
+
+      if (opaque && runStart === null) {
+        runStart = x;
+      }
+
+      if ((!opaque || x === width) && runStart !== null) {
+        mergeShapeRun(shape, lastRunByKey, runStart, x - runStart, y);
+        runStart = null;
+      }
+    }
+  }
+
+  const next = shape.length > 0 ? shape : [{ x: 0, y: 0, width, height: collapsedPeekHeight }];
+  collapsedShapeCache.set(cacheKey, next);
+  return next;
+}
+
+function mergeShapeRun(
+  shape: Electron.Rectangle[],
+  lastRunByKey: Map<string, Electron.Rectangle>,
+  x: number,
+  width: number,
+  y: number
+): void {
+  if (width <= 0) {
+    return;
+  }
+
+  const key = `${x}:${width}`;
+  const previous = lastRunByKey.get(key);
+  if (previous && previous.y + previous.height === y) {
+    previous.height += 1;
+    return;
+  }
+
+  const next = { x, y, width, height: 1 };
+  shape.push(next);
+  lastRunByKey.set(key, next);
 }
 
 function getExpandedHeight(size: { panelTop: number; panelScale: number }): number {

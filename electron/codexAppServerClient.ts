@@ -42,7 +42,7 @@ export class CodexAppServerClient {
 
   async readRateLimits(): Promise<RateLimitSnapshot> {
     const result = (await this.request("account/rateLimits/read", null, 20_000)) as RawRateLimitResponse;
-    const raw = result.rateLimitsByLimitId?.codex ?? result.rateLimits;
+    const raw = this.selectRateLimits(result);
 
     if (!raw?.primary || !raw.secondary) {
       throw new Error("Codex rate-limit payload did not include codex primary/secondary windows.");
@@ -56,6 +56,28 @@ export class CodexAppServerClient {
       resetCredits: result.rateLimitResetCredits?.availableCount ?? null,
       fetchedAt: Date.now()
     };
+  }
+
+  private selectRateLimits(result: RawRateLimitResponse): RawRateLimitSnapshot | null | undefined {
+    const snapshots = Object.values(result.rateLimitsByLimitId ?? {}).filter(
+      (snapshot) => snapshot?.primary && snapshot.secondary
+    );
+    if (snapshots.length === 0) {
+      return result.rateLimits;
+    }
+
+    const namedCodexLimits = snapshots.filter((snapshot) => snapshot.limitId?.startsWith("codex_"));
+    const candidates = namedCodexLimits.length > 0 ? namedCodexLimits : snapshots;
+
+    return candidates.reduce((best, current) => {
+      const bestReset = best.secondary?.resetsAt ?? 0;
+      const currentReset = current.secondary?.resetsAt ?? 0;
+      if (currentReset !== bestReset) {
+        return currentReset > bestReset ? current : best;
+      }
+
+      return (current.secondary?.usedPercent ?? 100) < (best.secondary?.usedPercent ?? 100) ? current : best;
+    });
   }
 
   async listThreads(limit = 12): Promise<unknown[]> {

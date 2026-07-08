@@ -8,7 +8,7 @@
     <a href="#english">English</a>
   </p>
   <p>
-    <img alt="Version" src="https://img.shields.io/badge/version-1.0.1-7ef6c7?style=for-the-badge" />
+    <img alt="Version" src="https://img.shields.io/badge/version-1.0.2-7ef6c7?style=for-the-badge" />
     <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-78d6ff?style=for-the-badge" />
     <img alt="Electron" src="https://img.shields.io/badge/Electron-41-9feaf9?style=for-the-badge&logo=electron" />
     <img alt="React" src="https://img.shields.io/badge/React-19-61dafb?style=for-the-badge&logo=react" />

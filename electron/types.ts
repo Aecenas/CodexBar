@@ -62,6 +62,8 @@ export interface ActivityDiagnostics {
   lastProbeAt: number | null;
   lastSource: string;
   lastThreadStatus: string | null;
+  lastNewestSessionWriteAt: number | null;
+  lastSessionActivityAt: number | null;
 }
 
 export interface TokenUsageDiagnostics {

@@ -4,8 +4,9 @@ import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
-const RECENT_SESSION_WRITE_BUSY_MS = 20_000;
+const SESSION_ACTIVITY_BUSY_MS = 90_000;
 const CODEX_HOME = process.env.CODEX_HOME || path.join(homedir(), ".codex");
+const BUSY_THREAD_STATUSES = new Set(["running", "active", "working", "streaming", "processing", "pending"]);
 
 interface ThreadLike {
   status?: { type?: string } | null;
@@ -16,6 +17,8 @@ export class CodexActivityDetector {
   private lastProbeAt: number | null = null;
   private lastSource = "not-started";
   private lastThreadStatus: string | null = null;
+  private lastNewestSessionWriteAt: number | null = null;
+  private lastSessionActivityAt: number | null = null;
 
   constructor(private readonly client: CodexAppServerClient) {}
 
@@ -24,13 +27,13 @@ export class CodexActivityDetector {
     try {
       const threads = (await this.client.listThreads(8)) as ThreadLike[];
       this.lastThreadStatus = threads.map((thread) => thread.status?.type).find(Boolean) ?? null;
-      if (threads.some((thread) => thread.status?.type === "running" || thread.status?.type === "active")) {
+      if (threads.some((thread) => BUSY_THREAD_STATUSES.has(thread.status?.type ?? ""))) {
         this.lastSource = "thread-status";
         return "busy";
       }
 
-      if (await this.hasRecentSessionWrite()) {
-        this.lastSource = "session-write";
+      if (await this.hasRecentSessionActivity()) {
+        this.lastSource = "session-activity";
         return "busy";
       }
 
@@ -38,8 +41,8 @@ export class CodexActivityDetector {
       return "idle";
     } catch {
       try {
-        if (await this.hasRecentSessionWrite()) {
-          this.lastSource = "fallback-session-write";
+        if (await this.hasRecentSessionActivity()) {
+          this.lastSource = "fallback-session-activity";
           return "busy";
         }
 
@@ -57,17 +60,25 @@ export class CodexActivityDetector {
       sessionsDir: this.sessionsDir,
       lastProbeAt: this.lastProbeAt,
       lastSource: this.lastSource,
-      lastThreadStatus: this.lastThreadStatus
+      lastThreadStatus: this.lastThreadStatus,
+      lastNewestSessionWriteAt: this.lastNewestSessionWriteAt,
+      lastSessionActivityAt: this.lastSessionActivityAt
     };
   }
 
-  private async hasRecentSessionWrite(): Promise<boolean> {
+  private async hasRecentSessionActivity(): Promise<boolean> {
     const newestWrite = await this.findNewestSessionWrite(this.sessionsDir);
     if (!newestWrite) {
       return false;
     }
 
-    return Date.now() - newestWrite <= RECENT_SESSION_WRITE_BUSY_MS;
+    const now = Date.now();
+    if (this.lastNewestSessionWriteAt === null || newestWrite > this.lastNewestSessionWriteAt) {
+      this.lastNewestSessionWriteAt = newestWrite;
+      this.lastSessionActivityAt = now;
+    }
+
+    return now - newestWrite <= SESSION_ACTIVITY_BUSY_MS || now - (this.lastSessionActivityAt ?? 0) <= SESSION_ACTIVITY_BUSY_MS;
   }
 
   private async findNewestSessionWrite(directory: string): Promise<number | null> {
