@@ -1,58 +1,48 @@
-import type { CodexAppServerClient } from "./codexAppServerClient.js";
 import type { ActivityDiagnostics, ActivityState } from "./types.js";
+import { watch, type FSWatcher } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
 const SESSION_ACTIVITY_BUSY_MS = 90_000;
-const CODEX_HOME = process.env.CODEX_HOME || path.join(homedir(), ".codex");
-const BUSY_THREAD_STATUSES = new Set(["running", "active", "working", "streaming", "processing", "pending"]);
-
-interface ThreadLike {
-  status?: { type?: string } | null;
-}
+const FULL_SCAN_INTERVAL_MS = 5 * 60_000;
 
 export class CodexActivityDetector {
-  private readonly sessionsDir = path.join(CODEX_HOME, "sessions");
+  private readonly sessionsDir: string;
   private lastProbeAt: number | null = null;
   private lastSource = "not-started";
-  private lastThreadStatus: string | null = null;
   private lastNewestSessionWriteAt: number | null = null;
   private lastSessionActivityAt: number | null = null;
+  private watcher: FSWatcher | null = null;
+  private lastFullScanAt = 0;
+  private baselineEstablished = false;
 
-  constructor(private readonly client: CodexAppServerClient) {}
+  constructor(codexHome = process.env.CODEX_HOME ?? path.join(homedir(), ".codex")) {
+    this.sessionsDir = path.join(codexHome, "sessions");
+    this.ensureWatcher();
+  }
 
   async getActivity(): Promise<ActivityState> {
     this.lastProbeAt = Date.now();
     try {
-      const threads = (await this.client.listThreads(8)) as ThreadLike[];
-      this.lastThreadStatus = threads.map((thread) => thread.status?.type).find(Boolean) ?? null;
-      if (threads.some((thread) => BUSY_THREAD_STATUSES.has(thread.status?.type ?? ""))) {
-        this.lastSource = "thread-status";
-        return "busy";
-      }
-
       if (await this.hasRecentSessionActivity()) {
-        this.lastSource = "session-activity";
+        if (this.lastSource !== "session-watch") {
+          this.lastSource = "session-scan";
+        }
         return "busy";
       }
 
       this.lastSource = "idle";
       return "idle";
     } catch {
-      try {
-        if (await this.hasRecentSessionActivity()) {
-          this.lastSource = "fallback-session-activity";
-          return "busy";
-        }
-
-        this.lastSource = "unknown";
-        return "unknown";
-      } catch {
-        this.lastSource = "error";
-        return "unknown";
-      }
+      this.lastSource = "error";
+      return "unknown";
     }
+  }
+
+  dispose(): void {
+    this.watcher?.close();
+    this.watcher = null;
   }
 
   getDiagnostics(): ActivityDiagnostics {
@@ -60,25 +50,59 @@ export class CodexActivityDetector {
       sessionsDir: this.sessionsDir,
       lastProbeAt: this.lastProbeAt,
       lastSource: this.lastSource,
-      lastThreadStatus: this.lastThreadStatus,
       lastNewestSessionWriteAt: this.lastNewestSessionWriteAt,
       lastSessionActivityAt: this.lastSessionActivityAt
     };
   }
 
   private async hasRecentSessionActivity(): Promise<boolean> {
-    const newestWrite = await this.findNewestSessionWrite(this.sessionsDir);
-    if (!newestWrite) {
-      return false;
-    }
-
     const now = Date.now();
-    if (this.lastNewestSessionWriteAt === null || newestWrite > this.lastNewestSessionWriteAt) {
-      this.lastNewestSessionWriteAt = newestWrite;
-      this.lastSessionActivityAt = now;
+    this.ensureWatcher();
+    if (!this.baselineEstablished || !this.watcher || now - this.lastFullScanAt >= FULL_SCAN_INTERVAL_MS) {
+      const newestWrite = await this.findNewestSessionWrite(this.sessionsDir);
+      this.lastFullScanAt = now;
+      if (newestWrite !== null) {
+        if (this.baselineEstablished && this.lastNewestSessionWriteAt !== null && newestWrite > this.lastNewestSessionWriteAt) {
+          this.lastSessionActivityAt = now;
+        } else if (!this.baselineEstablished && now - newestWrite <= SESSION_ACTIVITY_BUSY_MS) {
+          this.lastSessionActivityAt = newestWrite;
+        }
+        this.lastNewestSessionWriteAt = newestWrite;
+      }
+      this.baselineEstablished = true;
     }
 
-    return now - newestWrite <= SESSION_ACTIVITY_BUSY_MS || now - (this.lastSessionActivityAt ?? 0) <= SESSION_ACTIVITY_BUSY_MS;
+    return (
+      now - (this.lastNewestSessionWriteAt ?? 0) <= SESSION_ACTIVITY_BUSY_MS ||
+      now - (this.lastSessionActivityAt ?? 0) <= SESSION_ACTIVITY_BUSY_MS
+    );
+  }
+
+  private ensureWatcher(): void {
+    if (this.watcher) {
+      return;
+    }
+
+    try {
+      const watcher = watch(this.sessionsDir, { recursive: true }, (_eventType, fileName) => {
+        const name = fileName;
+        if (name && !name.endsWith(".jsonl")) {
+          return;
+        }
+
+        this.lastSessionActivityAt = Date.now();
+        this.lastSource = "session-watch";
+      });
+      watcher.on("error", () => {
+        if (this.watcher === watcher) {
+          this.watcher = null;
+        }
+        watcher.close();
+      });
+      this.watcher = watcher;
+    } catch {
+      this.watcher = null;
+    }
   }
 
   private async findNewestSessionWrite(directory: string): Promise<number | null> {
@@ -91,28 +115,28 @@ export class CodexActivityDetector {
       return null;
     }
 
-    for (const entry of entries) {
+    const candidates = await Promise.all(entries.map(async (entry): Promise<number | null> => {
       const fullPath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
-        const nested = await this.findNewestSessionWrite(fullPath);
-        if (nested !== null && (newest === null || nested > newest)) {
-          newest = nested;
-        }
-        continue;
+        return this.findNewestSessionWrite(fullPath);
       }
 
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
-        continue;
+        return null;
       }
 
       try {
         const fileStat = await stat(fullPath);
-        const modifiedAt = fileStat.mtimeMs;
-        if (newest === null || modifiedAt > newest) {
-          newest = modifiedAt;
-        }
+        return fileStat.mtimeMs;
       } catch {
         // Ignore files that move or are locked while Codex is writing them.
+        return null;
+      }
+    }));
+
+    for (const candidate of candidates) {
+      if (candidate !== null && (newest === null || candidate > newest)) {
+        newest = candidate;
       }
     }
 

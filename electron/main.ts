@@ -1,10 +1,11 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, Tray } from "electron";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { CodexActivityDetector } from "./codexActivityDetector.js";
 import { CodexAppServerClient } from "./codexAppServerClient.js";
 import { DEFAULT_POLLING_SETTINGS, normalizePollingSettings } from "./pollingSettings.js";
 import { RefreshScheduler } from "./refreshScheduler.js";
-import type { VisualSize } from "./types.js";
+import type { BarPosition, PanelLayout, PanelMode, VisualSize } from "./types.js";
 import { checkForUpdate, downloadAndInstallUpdate } from "./updateService.js";
 
 let mainWindow: BrowserWindow | null = null;
@@ -34,13 +35,18 @@ const collapsedPeekHeight = 10;
 const transparentAlphaThreshold = 12;
 
 let currentVisualSize: VisualSize = "medium";
-let panelExpanded = false;
+let panelLayout: PanelLayout = { mode: "none" };
 let barCollapsed = false;
 let mousePassthrough = false;
 let positionAdjustmentEnabled = false;
 let customWindowX: number | null = null;
+let customDisplayId: number | null = null;
 let dragState: { startMouseX: number; startMouseY: number; startBounds: Electron.Rectangle } | null = null;
 const collapsedShapeCache = new Map<string, Electron.Rectangle[]>();
+const quotaPanelWidth = 386;
+const quotaPanelHeight = 176;
+const settingsPanelLeft = 154;
+const quotaPanelLeft: Record<"fiveHour" | "week", number> = { fiveHour: 150, week: 250 };
 
 function createWindow(): void {
   const display = screen.getPrimaryDisplay();
@@ -68,7 +74,8 @@ function createWindow(): void {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true
     }
   });
 
@@ -78,14 +85,25 @@ function createWindow(): void {
   mainWindow.setMenu(null);
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  const productionEntry = path.join(__dirname, "../dist/index.html");
+  const allowedRendererLocation = devServerUrl ? new URL(devServerUrl).origin : pathToFileURL(productionEntry).href;
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const allowed = devServerUrl
+      ? new URL(url).origin === allowedRendererLocation
+      : url === allowedRendererLocation || url.startsWith(`${allowedRendererLocation}#`);
+    if (!allowed) {
+      event.preventDefault();
+    }
+  });
   if (devServerUrl) {
     void mainWindow.loadURL(devServerUrl);
   } else {
-    void mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
+    void mainWindow.loadFile(productionEntry);
   }
 
   client = new CodexAppServerClient();
-  scheduler = new RefreshScheduler(mainWindow, client, new CodexActivityDetector(client));
+  scheduler = new RefreshScheduler(mainWindow, client, new CodexActivityDetector());
   mainWindow.webContents.once("did-finish-load", () => {
     scheduler?.start();
     mainWindow?.show();
@@ -105,9 +123,9 @@ app.whenReady().then(() => {
   app.setName("CodexBar");
   app.setAppUserModelId("com.aecenas.codexbar");
 
-  ipcMain.on("panel:set-expanded", (_event, expanded: boolean) => {
-    panelExpanded = expanded;
-    if (expanded) {
+  ipcMain.on("panel:set-layout", (_event, payload: unknown) => {
+    panelLayout = normalizePanelLayout(payload);
+    if (panelLayout.mode !== "none") {
       barCollapsed = false;
     }
     applyWindowLayout();
@@ -126,6 +144,7 @@ app.whenReady().then(() => {
     const next = normalizePositioningPayload(payload);
     positionAdjustmentEnabled = next.enabled;
     customWindowX = next.enabled ? next.x : null;
+    customDisplayId = next.enabled ? next.displayId : null;
     applyWindowLayout();
   });
 
@@ -140,6 +159,8 @@ app.whenReady().then(() => {
     }
 
     setMousePassthrough(false);
+    panelLayout = { mode: "none" };
+    applyWindowLayout();
     dragState = {
       startMouseX: point.screenX,
       startMouseY: point.screenY,
@@ -165,7 +186,9 @@ app.whenReady().then(() => {
   ipcMain.handle("bar:drag-end", () => {
     if (!mainWindow || mainWindow.isDestroyed() || !dragState) {
       dragState = null;
-      return customWindowX;
+      return customWindowX === null || customDisplayId === null
+        ? null
+        : ({ x: customWindowX, displayId: customDisplayId } satisfies BarPosition);
     }
 
     dragState = null;
@@ -176,8 +199,9 @@ app.whenReady().then(() => {
       y: bounds.y + Math.round(bounds.height / 2)
     });
     customWindowX = clamp(bounds.x, display.workArea.x, display.workArea.x + display.workArea.width - size.width);
+    customDisplayId = display.id;
     applyWindowLayout();
-    return customWindowX;
+    return { x: customWindowX, displayId: customDisplayId } satisfies BarPosition;
   });
 
   ipcMain.on("panel:set-visual-size", (_event, visualSize: VisualSize) => {
@@ -205,15 +229,10 @@ app.whenReady().then(() => {
       event.sender,
       typeof downloadProxyPrefix === "string" ? downloadProxyPrefix : ""
     );
-    setTimeout(() => app.quit(), 150);
-    return status;
-  });
-  ipcMain.on("app:open-external", (_event, url: unknown) => {
-    if (typeof url !== "string" || !url.startsWith("https://github.com/Aecenas/CodexBar/releases")) {
-      return;
+    if (status.updateAvailable && status.downloadProgress === 100) {
+      setTimeout(() => app.quit(), 150);
     }
-
-    void shell.openExternal(url);
+    return status;
   });
   ipcMain.on("app:quit", () => {
     app.quit();
@@ -221,6 +240,10 @@ app.whenReady().then(() => {
 
   createTray();
   createWindow();
+
+  screen.on("display-added", applyWindowLayout);
+  screen.on("display-removed", applyWindowLayout);
+  screen.on("display-metrics-changed", applyWindowLayout);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -249,30 +272,43 @@ function applyWindowLayout(): void {
 
   const size = windowSizes[currentVisualSize];
   const barWidth = size.width;
-  const width = panelExpanded ? Math.ceil(barWidth + expandedRightPadding * size.panelScale) : barWidth;
+  const requestedWindowSize = getWindowSize(size);
   const display = getTargetDisplay(barWidth);
-  const height = panelExpanded ? getExpandedHeight(size) : barCollapsed ? collapsedPeekHeight : size.collapsedHeight;
-  const x =
-    positionAdjustmentEnabled && customWindowX !== null
-      ? clamp(customWindowX, display.workArea.x, display.workArea.x + display.workArea.width - barWidth)
-      : Math.round(display.workArea.x + (display.workArea.width - barWidth) / 2);
+  const width = Math.min(requestedWindowSize.width, display.workArea.width);
+  const height = Math.min(requestedWindowSize.height, display.workArea.height);
+  const desiredBarX =
+    barWidth > display.workArea.width
+      ? display.workArea.x
+      : positionAdjustmentEnabled && customWindowX !== null
+        ? clamp(customWindowX, display.workArea.x, display.workArea.x + display.workArea.width - barWidth)
+        : Math.round(display.workArea.x + (display.workArea.width - barWidth) / 2);
+  const maxWindowX = display.workArea.x + display.workArea.width - width;
+  const x = width > display.workArea.width ? display.workArea.x : clamp(desiredBarX, display.workArea.x, maxWindowX);
   const y = display.workArea.y;
   const bounds = mainWindow.getBounds();
 
-  if (positionAdjustmentEnabled && customWindowX !== null && customWindowX !== x) {
-    customWindowX = x;
+  if (positionAdjustmentEnabled && customWindowX !== null && customWindowX !== desiredBarX) {
+    customWindowX = desiredBarX;
+    customDisplayId = display.id;
   }
 
   if (bounds.width !== width || bounds.height !== height || bounds.x !== x || bounds.y !== y) {
     mainWindow.setBounds({ ...bounds, x, y, width, height }, false);
   }
 
-  applyWindowShape(width, size.collapsedHeight);
+  applyWindowShape(width, height, size);
 }
 
 function getTargetDisplay(width: number): Electron.Display {
   if (!positionAdjustmentEnabled || customWindowX === null) {
     return screen.getPrimaryDisplay();
+  }
+
+  if (customDisplayId !== null) {
+    const savedDisplay = screen.getAllDisplays().find((display) => display.id === customDisplayId);
+    if (savedDisplay) {
+      return savedDisplay;
+    }
   }
 
   return screen.getDisplayNearestPoint({
@@ -290,17 +326,100 @@ function setMousePassthrough(passthrough: boolean): void {
   mainWindow.setIgnoreMouseEvents(passthrough, { forward: true });
 }
 
-function applyWindowShape(width: number, scaledBarHeight: number): void {
+function applyWindowShape(
+  width: number,
+  height: number,
+  size: { width: number; collapsedHeight: number; panelTop: number; panelScale: number }
+): void {
   if (!mainWindow || mainWindow.isDestroyed() || (process.platform !== "win32" && process.platform !== "linux")) {
     return;
   }
 
-  if (barCollapsed && !panelExpanded) {
-    mainWindow.setShape(getCollapsedShape(width, scaledBarHeight));
+  if (barCollapsed && panelLayout.mode === "none") {
+    mainWindow.setShape(getCollapsedShape(size.width, size.collapsedHeight));
     return;
   }
 
-  mainWindow.setShape([]);
+  if (panelLayout.mode === "none") {
+    mainWindow.setShape([]);
+    return;
+  }
+
+  const shape: Electron.Rectangle[] = [{ x: 0, y: 0, width: size.width, height: size.collapsedHeight }];
+  if (panelLayout.mode === "context" && panelLayout.contextRect) {
+    shape.push(clampRectangle(panelLayout.contextRect, width, height));
+  } else if (panelLayout.mode === "fiveHour" || panelLayout.mode === "week") {
+    shape.push(
+      clampRectangle(
+        {
+          x: quotaPanelLeft[panelLayout.mode],
+          y: size.panelTop,
+          width: Math.ceil(quotaPanelWidth * size.panelScale),
+          height: Math.ceil(quotaPanelHeight * size.panelScale)
+        },
+        width,
+        height
+      )
+    );
+  } else if (panelLayout.mode === "settings") {
+    shape.push(
+      clampRectangle(
+        {
+          x: settingsPanelLeft,
+          y: size.panelTop,
+          width: width - settingsPanelLeft,
+          height: height - size.panelTop
+        },
+        width,
+        height
+      )
+    );
+  }
+
+  mainWindow.setShape(shape.filter((rectangle) => rectangle.width > 0 && rectangle.height > 0));
+}
+
+function getWindowSize(size: { width: number; collapsedHeight: number; panelTop: number; panelScale: number }): {
+  width: number;
+  height: number;
+} {
+  if (barCollapsed && panelLayout.mode === "none") {
+    return { width: size.width, height: collapsedPeekHeight };
+  }
+
+  if (panelLayout.mode === "settings") {
+    return {
+      width: Math.ceil(size.width + expandedRightPadding * size.panelScale),
+      height: getExpandedHeight(size)
+    };
+  }
+
+  if (panelLayout.mode === "fiveHour" || panelLayout.mode === "week") {
+    return {
+      width: size.width,
+      height: Math.ceil(size.panelTop + quotaPanelHeight * size.panelScale + expandedWindowPadding)
+    };
+  }
+
+  if (panelLayout.mode === "context" && panelLayout.contextRect) {
+    return {
+      width: size.width,
+      height: Math.max(size.collapsedHeight, Math.ceil(panelLayout.contextRect.y + panelLayout.contextRect.height + 4))
+    };
+  }
+
+  return { width: size.width, height: size.collapsedHeight };
+}
+
+function clampRectangle(rectangle: Electron.Rectangle, width: number, height: number): Electron.Rectangle {
+  const x = clamp(rectangle.x, 0, width);
+  const y = clamp(rectangle.y, 0, height);
+  return {
+    x,
+    y,
+    width: Math.max(0, Math.min(Math.round(rectangle.width), width - x)),
+    height: Math.max(0, Math.min(Math.round(rectangle.height), height - y))
+  };
 }
 
 function getCollapsedShape(width: number, scaledBarHeight: number): Electron.Rectangle[] {
@@ -375,15 +494,49 @@ function getExpandedHeight(size: { panelTop: number; panelScale: number }): numb
   return Math.ceil(size.panelTop + settingsPanelHeight * size.panelScale + expandedWindowPadding);
 }
 
-function normalizePositioningPayload(payload: unknown): { enabled: boolean; x: number | null } {
+function normalizePanelLayout(payload: unknown): PanelLayout {
   if (!payload || typeof payload !== "object") {
-    return { enabled: false, x: null };
+    return { mode: "none" };
   }
 
-  const value = payload as { enabled?: unknown; x?: unknown };
+  const value = payload as { mode?: unknown; contextRect?: unknown };
+  const modes: PanelMode[] = ["none", "fiveHour", "week", "settings", "context"];
+  const mode = modes.includes(value.mode as PanelMode) ? (value.mode as PanelMode) : "none";
+  if (mode !== "context") {
+    return { mode };
+  }
+
+  if (!value.contextRect || typeof value.contextRect !== "object") {
+    return { mode: "none" };
+  }
+
+  const rectangle = value.contextRect as Record<string, unknown>;
+  if (![rectangle.x, rectangle.y, rectangle.width, rectangle.height].every((part) => typeof part === "number" && Number.isFinite(part))) {
+    return { mode: "none" };
+  }
+
+  return {
+    mode,
+    contextRect: {
+      x: Math.max(0, Math.round(rectangle.x as number)),
+      y: Math.max(0, Math.round(rectangle.y as number)),
+      width: Math.max(1, Math.round(rectangle.width as number)),
+      height: Math.max(1, Math.round(rectangle.height as number))
+    }
+  };
+}
+
+function normalizePositioningPayload(payload: unknown): { enabled: boolean; x: number | null; displayId: number | null } {
+  if (!payload || typeof payload !== "object") {
+    return { enabled: false, x: null, displayId: null };
+  }
+
+  const value = payload as { enabled?: unknown; x?: unknown; displayId?: unknown };
   return {
     enabled: value.enabled === true,
-    x: typeof value.x === "number" && Number.isFinite(value.x) ? Math.round(value.x) : null
+    x: typeof value.x === "number" && Number.isFinite(value.x) ? Math.round(value.x) : null,
+    displayId:
+      typeof value.displayId === "number" && Number.isFinite(value.displayId) ? Math.round(value.displayId) : null
   };
 }
 

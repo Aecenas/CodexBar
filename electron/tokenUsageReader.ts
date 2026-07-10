@@ -2,11 +2,14 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import readline from "node:readline";
+import type { TokenUsageDiagnostics } from "./types.js";
 
 interface CachedSessionTokens {
+  ino: number;
+  birthtimeMs: number;
   mtimeMs: number;
   size: number;
+  readOffset: number;
   lastTotal: number | null;
   buckets: TokenUsageBucket[];
 }
@@ -20,13 +23,6 @@ export interface TokenUsageSnapshot {
   fiveHourTokensUsed: number;
   weekTokensUsed: number;
   fetchedAt: number;
-}
-
-export interface TokenUsageDiagnostics {
-  sessionsDir: string;
-  cachedFiles: number;
-  cachedBuckets: number;
-  lastReadAt: number | null;
 }
 
 const FIVE_HOUR_MS = 5 * 60 * 60 * 1000;
@@ -87,8 +83,14 @@ export class TokenUsageReader {
     const seen = new Set<string>();
 
     for (const file of files) {
+      let metadata;
+      try {
+        metadata = await stat(file);
+      } catch {
+        this.cache.delete(file);
+        continue;
+      }
       seen.add(file);
-      const metadata = await stat(file);
 
       if (now - metadata.mtimeMs > SESSION_RETENTION_MS) {
         this.cache.delete(file);
@@ -100,21 +102,32 @@ export class TokenUsageReader {
         continue;
       }
 
-      if (cached && metadata.size >= cached.size) {
-        const parsed = await parseTokenEvents(file, cached.size, cached.lastTotal);
+      if (
+        cached &&
+        cached.ino === metadata.ino &&
+        cached.birthtimeMs === metadata.birthtimeMs &&
+        metadata.size > cached.size
+      ) {
+        const parsed = await parseTokenEvents(file, cached.readOffset, metadata.size, cached.lastTotal);
         this.cache.set(file, {
+          ino: metadata.ino,
+          birthtimeMs: metadata.birthtimeMs,
           mtimeMs: metadata.mtimeMs,
           size: metadata.size,
+          readOffset: parsed.nextOffset,
           lastTotal: parsed.lastTotal,
           buckets: mergeBuckets(cached.buckets, parsed.buckets, now)
         });
         continue;
       }
 
-      const parsed = await parseTokenEvents(file, 0, null);
+      const parsed = await parseTokenEvents(file, 0, metadata.size, null);
       this.cache.set(file, {
+        ino: metadata.ino,
+        birthtimeMs: metadata.birthtimeMs,
         mtimeMs: metadata.mtimeMs,
         size: metadata.size,
+        readOffset: parsed.nextOffset,
         lastTotal: parsed.lastTotal,
         buckets: parsed.buckets.filter((bucket) => now - bucket.at <= SESSION_RETENTION_MS)
       });
@@ -163,60 +176,92 @@ async function listJsonlFiles(root: string): Promise<string[]> {
 async function parseTokenEvents(
   file: string,
   start: number,
+  endExclusive: number,
   previousTotal: number | null
-): Promise<{ buckets: TokenUsageBucket[]; lastTotal: number | null }> {
-  const stream = createReadStream(file, { encoding: "utf8", start });
-  const lines = readline.createInterface({
-    input: stream,
-    crlfDelay: Infinity
-  });
+): Promise<{ buckets: TokenUsageBucket[]; lastTotal: number | null; nextOffset: number }> {
   const buckets = new Map<number, number>();
   let lastTotal = previousTotal;
+  if (endExclusive <= start) {
+    return { buckets: [], lastTotal, nextOffset: start };
+  }
 
-  for await (const line of lines) {
-    if (!line.includes('"token_count"')) {
-      continue;
+  const stream = createReadStream(file, { start, end: endExclusive - 1 });
+  let pending = Buffer.alloc(0);
+  let bytesRead = 0;
+
+  for await (const rawChunk of stream) {
+    const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
+    bytesRead += chunk.length;
+    const data = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
+    let lineStart = 0;
+    let newlineIndex = data.indexOf(0x0a, lineStart);
+
+    while (newlineIndex >= 0) {
+      const line = data.subarray(lineStart, newlineIndex).toString("utf8").trim();
+      lastTotal = parseTokenLine(line, buckets, lastTotal);
+      lineStart = newlineIndex + 1;
+      newlineIndex = data.indexOf(0x0a, lineStart);
     }
 
-    try {
-      const entry = JSON.parse(line) as {
-        timestamp?: unknown;
-        payload?: {
-          info?: {
-            last_token_usage?: { total_tokens?: unknown };
-            total_token_usage?: { total_tokens?: unknown };
-          };
-        };
-      };
-      const timestamp = typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : NaN;
-      if (!Number.isFinite(timestamp)) {
-        continue;
-      }
-
-      const lastTokens = entry.payload?.info?.last_token_usage?.total_tokens;
-      const totalTokens = entry.payload?.info?.total_token_usage?.total_tokens;
-      const tokens =
-        typeof lastTokens === "number" && Number.isFinite(lastTokens)
-          ? lastTokens
-          : getTotalDelta(totalTokens, lastTotal);
-
-      if (typeof totalTokens === "number" && Number.isFinite(totalTokens)) {
-        lastTotal = totalTokens;
-      }
-
-      if (tokens > 0) {
-        const bucketAt = Math.floor(timestamp / 60_000) * 60_000;
-        buckets.set(bucketAt, (buckets.get(bucketAt) ?? 0) + tokens);
-      }
-    } catch {
-      // A partial trailing JSONL line should not break the quota UI.
-    }
+    pending = Buffer.from(data.subarray(lineStart));
   }
 
   return {
     buckets: Array.from(buckets, ([at, tokens]) => ({ at, tokens })).sort((a, b) => a.at - b.at),
-    lastTotal
+    lastTotal,
+    nextOffset: start + bytesRead - pending.length
   };
+}
+
+function parseTokenLine(line: string, buckets: Map<number, number>, previousTotal: number | null): number | null {
+  if (!line.includes('"token_count"')) {
+    return previousTotal;
+  }
+
+  try {
+    const entry = JSON.parse(line) as {
+      timestamp?: unknown;
+      payload?: {
+        type?: unknown;
+        info?: {
+          last_token_usage?: { total_tokens?: unknown };
+          total_token_usage?: { total_tokens?: unknown };
+        };
+      };
+    };
+    if (entry.payload?.type !== "token_count") {
+      return previousTotal;
+    }
+
+    const timestamp = typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : NaN;
+    if (!Number.isFinite(timestamp)) {
+      return previousTotal;
+    }
+
+    const lastTokens = entry.payload.info?.last_token_usage?.total_tokens;
+    const totalTokens = entry.payload.info?.total_token_usage?.total_tokens;
+    const normalizedTotal = typeof totalTokens === "number" && Number.isFinite(totalTokens) ? totalTokens : null;
+    const normalizedLast = typeof lastTokens === "number" && Number.isFinite(lastTokens) ? lastTokens : null;
+    const tokens = normalizedTotal !== null
+      ? getTotalDelta(normalizedTotal, previousTotal)
+      : normalizedLast !== null
+        ? normalizedLast
+        : 0;
+
+    if (tokens > 0) {
+      const bucketAt = Math.floor(timestamp / 60_000) * 60_000;
+      buckets.set(bucketAt, (buckets.get(bucketAt) ?? 0) + tokens);
+    }
+
+    if (normalizedTotal !== null) {
+      return normalizedTotal;
+    }
+
+    return normalizedLast === null ? previousTotal : (previousTotal ?? 0) + normalizedLast;
+  } catch {
+    // Complete but malformed records are ignored without advancing cumulative usage.
+    return previousTotal;
+  }
 }
 
 function mergeBuckets(current: TokenUsageBucket[], appended: TokenUsageBucket[], now: number): TokenUsageBucket[] {

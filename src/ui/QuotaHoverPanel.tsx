@@ -52,8 +52,8 @@ export function QuotaHoverPanel({
       className={`quota-panel ${kind}`}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
-      onMouseEnter={onPointerEnter}
-      onMouseLeave={onPointerLeave}
+      onFocus={onPointerEnter}
+      onBlur={onPointerLeave}
       aria-label={`${label} quota details`}
     >
       <div className="quota-panel-header">
@@ -63,7 +63,14 @@ export function QuotaHoverPanel({
         </span>
         <strong>{formatCountdown(resetAt, now)}</strong>
       </div>
-      <canvas ref={canvasRef} className="quota-curve" width={358} height={136} />
+      <canvas
+        ref={canvasRef}
+        className="quota-curve"
+        width={358}
+        height={136}
+        role="img"
+        aria-label={`${label}最近用量曲线，共 ${points.length} 个数据点`}
+      />
     </aside>
   );
 }

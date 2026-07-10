@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import type { AppSettings, QuotaHistoryPoint, QuotaUpdatePayload, UpdateStatus } from "../types";
+import type { AppSettings, PanelLayout, QuotaHistoryPoint, QuotaUpdatePayload, UpdateStatus } from "../types";
 import backgroundUrl from "../assets/background.png";
 import boltOverlay from "../assets/bolt-overlay.png";
 import { MetricGroup } from "./MetricGroup";
@@ -13,7 +13,6 @@ interface CodexBarProps {
   appSettings: AppSettings;
   updateStatus: UpdateStatus;
   onAppSettingsChange: (settings: AppSettings) => void;
-  onCheckForUpdates: () => Promise<UpdateStatus>;
   onUpgrade: () => Promise<UpdateStatus>;
 }
 
@@ -28,6 +27,8 @@ const BAR_SCALES: Record<AppSettings["visualSize"], number> = {
   large: 0.8
 };
 const TRANSPARENT_ALPHA_THRESHOLD = 12;
+const CONTEXT_MENU_WIDTH = 96;
+const CONTEXT_MENU_HEIGHT = 39;
 
 export function CodexBar({
   quota,
@@ -35,7 +36,6 @@ export function CodexBar({
   appSettings,
   updateStatus,
   onAppSettingsChange,
-  onCheckForUpdates,
   onUpgrade
 }: CodexBarProps) {
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
@@ -47,13 +47,53 @@ export function CodexBar({
   const barAlphaContext = useRef<CanvasRenderingContext2D | null>(null);
   const mousePassthrough = useRef(false);
   const dragPointerId = useRef<number | null>(null);
-  const stateLabel = quota.status === "ready" ? "Online" : quota.status === "loading" ? "Loading" : "Stale";
+  const stateLabel =
+    quota.status === "ready" ? "Online" : quota.status === "loading" ? "Loading" : quota.status === "error" ? "Error" : "Stale";
   const contextMenuOpen = contextMenu !== null;
   const collapsed = appSettings.autoCollapse && !autoRevealed && activePanel === null && !contextMenuOpen;
 
   useEffect(() => {
-    window.codexBar?.setPanelExpanded(activePanel !== null || contextMenuOpen);
-  }, [activePanel, contextMenuOpen]);
+    const layout: PanelLayout = activePanel
+      ? { mode: activePanel }
+      : contextMenu
+        ? {
+            mode: "context",
+            contextRect: {
+              x: contextMenu.x,
+              y: contextMenu.y,
+              width: CONTEXT_MENU_WIDTH,
+              height: CONTEXT_MENU_HEIGHT
+            }
+          }
+        : { mode: "none" };
+    window.codexBar?.setPanelLayout(layout);
+  }, [activePanel, contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenuOpen) {
+      return undefined;
+    }
+
+    const closeContextMenu = () => setContextMenu(null);
+    const handleDocumentPointerDown = (event: PointerEvent) => {
+      if (!isContextMenuTarget(event.target)) {
+        closeContextMenu();
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeContextMenu();
+      }
+    };
+    window.addEventListener("blur", closeContextMenu);
+    window.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("pointerdown", handleDocumentPointerDown, true);
+    return () => {
+      window.removeEventListener("blur", closeContextMenu);
+      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handleDocumentPointerDown, true);
+    };
+  }, [contextMenuOpen]);
 
   useEffect(() => {
     window.codexBar?.setBarCollapsed(collapsed);
@@ -120,7 +160,7 @@ export function CodexBar({
         window.clearTimeout(hideTimer.current);
       }
       clearCollapseTimer();
-      window.codexBar?.setPanelExpanded(false);
+      window.codexBar?.setPanelLayout({ mode: "none" });
       window.codexBar?.setBarCollapsed(false);
       setMousePassthrough(false);
     };
@@ -289,9 +329,8 @@ export function CodexBar({
     setMousePassthrough(false);
     setActivePanel(null);
     const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 96;
     setContextMenu({
-      x: Math.max(4, Math.min(event.clientX - rect.left + 8, rect.width - menuWidth - 4)),
+      x: Math.max(4, Math.min(event.clientX - rect.left + 8, rect.width - CONTEXT_MENU_WIDTH - 4)),
       y: Math.max(4, event.clientY - rect.top + 8)
     });
   }
@@ -306,12 +345,17 @@ export function CodexBar({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
-    const nextX = await window.codexBar?.endBarDrag();
-    if (typeof nextX === "number" && Number.isFinite(nextX)) {
-      onAppSettingsChange({
-        ...appSettings,
-        barX: nextX
-      });
+    try {
+      const nextPosition = await window.codexBar?.endBarDrag();
+      if (nextPosition && Number.isFinite(nextPosition.x) && Number.isFinite(nextPosition.displayId)) {
+        onAppSettingsChange({
+          ...appSettings,
+          barX: nextPosition.x,
+          barDisplayId: nextPosition.displayId
+        });
+      }
+    } catch {
+      scheduleAutoCollapse();
     }
   }
 
@@ -327,9 +371,6 @@ export function CodexBar({
       onPointerUp={(event) => void finishPointerDrag(event)}
       onPointerCancel={(event) => void finishPointerDrag(event)}
       onPointerLeave={handlePointerLeave}
-      onMouseEnter={handlePointerEnter}
-      onMouseMove={handlePointerMove}
-      onMouseLeave={handlePointerLeave}
       onContextMenu={handleContextMenu}
     >
       <section className="bar" aria-live="polite">
@@ -347,29 +388,35 @@ export function CodexBar({
           draggable={false}
         />
         {updateStatus.updateAvailable ? <span className="codex-update-dot" aria-hidden="true" /> : null}
-        <div
+        <button
+          type="button"
           className="metric-hover-zone metric-hover-codex"
           onPointerEnter={() => showPanel("settings")}
           onPointerLeave={scheduleHidePanel}
-          onMouseEnter={() => showPanel("settings")}
-          onMouseLeave={scheduleHidePanel}
-          aria-hidden="true"
+          onFocus={() => showPanel("settings")}
+          onBlur={scheduleHidePanel}
+          onClick={() => showPanel("settings")}
+          aria-label="打开 CodexBar 运行设置"
         />
-        <div
+        <button
+          type="button"
           className="metric-hover-zone metric-hover-five"
           onPointerEnter={() => showPanel("fiveHour")}
           onPointerLeave={scheduleHidePanel}
-          onMouseEnter={() => showPanel("fiveHour")}
-          onMouseLeave={scheduleHidePanel}
-          aria-hidden="true"
+          onFocus={() => showPanel("fiveHour")}
+          onBlur={scheduleHidePanel}
+          onClick={() => showPanel("fiveHour")}
+          aria-label="打开 5 小时额度详情"
         />
-        <div
+        <button
+          type="button"
           className="metric-hover-zone metric-hover-week"
           onPointerEnter={() => showPanel("week")}
           onPointerLeave={scheduleHidePanel}
-          onMouseEnter={() => showPanel("week")}
-          onMouseLeave={scheduleHidePanel}
-          aria-hidden="true"
+          onFocus={() => showPanel("week")}
+          onBlur={scheduleHidePanel}
+          onClick={() => showPanel("week")}
+          aria-label="打开一周额度详情"
         />
         <span className={`connection-dot ${quota.status}`} title={stateLabel} />
       </section>
@@ -398,7 +445,6 @@ export function CodexBar({
           settings={appSettings}
           updateStatus={updateStatus}
           onChange={handleAppSettingsChange}
-          onCheckForUpdates={onCheckForUpdates}
           onUpgrade={onUpgrade}
           onPointerEnter={keepPanelOpen}
           onPointerLeave={scheduleHidePanel}
@@ -423,10 +469,10 @@ export function CodexBar({
 function isInteractiveTarget(target: EventTarget): boolean {
   return (
     target instanceof Element &&
-    target.closest(".quota-panel, .settings-panel, .bar-context-menu, button, input, textarea, select, a") !== null
+    target.closest(".quota-panel, .settings-panel, .bar-context-menu, button:not(.metric-hover-zone), input, textarea, select, a") !== null
   );
 }
 
-function isContextMenuTarget(target: EventTarget): boolean {
+function isContextMenuTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(".bar-context-menu") !== null;
 }

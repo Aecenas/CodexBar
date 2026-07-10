@@ -1,6 +1,6 @@
 {
   "name": "codexbar",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "private": true,
   "description": "A tray-based desktop Codex quota bar for Windows.",
   "author": "Aecenas",
@@ -9,7 +9,10 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 npm run start:electron\"",
     "start:electron": "tsc -p tsconfig.electron.json && electron dist-electron/main.js",
-    "build": "tsc -p tsconfig.electron.json && vite build",
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.json",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "npm run typecheck && npm run build:electron && vite build",
+    "test": "npm run build:electron && node --test tests/*.test.cjs",
     "dist": "npm run build && electron-builder --win nsis --publish never",
     "preview": "vite preview --host 127.0.0.1"
   },

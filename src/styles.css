@@ -166,6 +166,17 @@ body {
   top: 0;
   z-index: 10;
   height: 111px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  appearance: none;
+}
+
+.metric-hover-zone:focus-visible {
+  outline: 2px solid rgba(126, 246, 199, 0.9);
+  outline-offset: -3px;
+  border-radius: 8px;
 }
 
 .metric-hover-five {
@@ -319,6 +330,24 @@ body {
   top: -1px;
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(245, 224, 163, 0.82), transparent);
+}
+
+.settings-panel.is-viewport-constrained {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(126, 246, 199, 0.42) rgba(0, 0, 0, 0.12);
+}
+
+.settings-panel.is-viewport-constrained .settings-tools-panel {
+  position: static;
+  grid-column: 1 / -1;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.settings-panel.is-viewport-constrained .settings-tools-panel::before {
+  display: none;
 }
 
 .bar-context-menu {

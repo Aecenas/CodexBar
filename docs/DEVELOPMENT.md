@@ -15,7 +15,7 @@ Polling settings are stored in local storage and sent to the Electron scheduler 
 
 Default values:
 
-- activity check: 10 seconds;
+- session activity check: 10 seconds;
 - busy quota polling: 30 seconds;
 - idle quota polling: 30 minutes.
 
@@ -25,13 +25,15 @@ Minimum values:
 - busy quota polling: 15 seconds;
 - idle quota polling: 5 minutes.
 
+All values are also capped below Node.js's maximum native timer delay, so malformed or manually edited settings cannot overflow into an immediate polling loop.
+
 ## Tray Shell
 
-The Electron window uses `skipTaskbar: true`, so it does not appear as a normal taskbar app. A persistent `Tray` instance owns the system tray entry. The context menu contains `开机启动` / `开机启动√` and `退出软件`. Startup is handled through Electron's `setLoginItemSettings`.
+The Electron window uses `skipTaskbar: true`, so it does not appear as a normal taskbar app. A persistent `Tray` instance owns the system tray entry, whose context menu contains only `退出软件`. Startup is configured from the hover settings panel through Electron's `setLoginItemSettings`.
 
 ## Update Checks
 
-The Electron main process checks `https://api.github.com/repos/Aecenas/CodexBar/releases/latest` when automatic update checks are enabled. The renderer stores the last result in local storage and checks at most once every 24 hours. When the user clicks `升级`, the app compares versions first. If a newer release exists, the main process downloads the Windows installer asset from GitHub Releases into the app user-data updates directory, reports progress to the renderer, and launches the installer after download.
+The Electron main process checks `https://api.github.com/repos/Aecenas/CodexBar/releases/latest` when automatic update checks are enabled. The renderer stores the last result in local storage and checks at most once every 24 hours. When the user clicks `升级`, the app compares versions first. If a newer release exists, the main process downloads the Windows installer asset into a temporary file, validates the GitHub-provided SHA-256 digest and asset size, atomically promotes the verified file, reports progress to the renderer, and then launches the installer.
 
 ## Packaging
 

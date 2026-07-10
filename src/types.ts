@@ -27,6 +27,17 @@ export interface PollingSettings {
 }
 
 export type VisualSize = "small" | "medium" | "large";
+export type PanelMode = "none" | "fiveHour" | "week" | "settings" | "context";
+
+export interface PanelLayout {
+  mode: PanelMode;
+  contextRect?: { x: number; y: number; width: number; height: number };
+}
+
+export interface BarPosition {
+  x: number;
+  displayId: number;
+}
 
 export interface AppSettings extends PollingSettings {
   visualSize: VisualSize;
@@ -36,6 +47,7 @@ export interface AppSettings extends PollingSettings {
   openAtLogin: boolean;
   downloadProxyPrefix: string;
   barX: number | null;
+  barDisplayId: number | null;
 }
 
 export interface UpdateStatus {
@@ -60,7 +72,6 @@ export interface ActivityDiagnostics {
   sessionsDir: string;
   lastProbeAt: number | null;
   lastSource: string;
-  lastThreadStatus: string | null;
   lastNewestSessionWriteAt: number | null;
   lastSessionActivityAt: number | null;
 }
@@ -84,13 +95,13 @@ export interface AppDiagnostics {
 
 export interface CodexBarBridge {
   onQuotaUpdate(callback: (payload: QuotaUpdatePayload) => void): () => void;
-  setPanelExpanded(expanded: boolean): void;
+  setPanelLayout(layout: PanelLayout): void;
   setBarCollapsed(collapsed: boolean): void;
   setMousePassthrough(passthrough: boolean): void;
-  setBarPositioning(enabled: boolean, x: number | null): void;
+  setBarPositioning(enabled: boolean, x: number | null, displayId: number | null): void;
   startBarDrag(screenX: number, screenY: number): void;
   moveBarDrag(screenX: number, screenY: number): void;
-  endBarDrag(): Promise<number | null>;
+  endBarDrag(): Promise<BarPosition | null>;
   quitApp(): void;
   setVisualSize(visualSize: VisualSize): void;
   getOpenAtLogin(): Promise<boolean>;
@@ -101,7 +112,6 @@ export interface CodexBarBridge {
   checkForUpdates(): Promise<UpdateStatus>;
   downloadAndInstallUpdate(downloadProxyPrefix?: string): Promise<UpdateStatus>;
   onUpdateDownloadProgress(callback: (progress: UpdateDownloadProgress) => void): () => void;
-  openExternal(url: string): void;
 }
 
 declare global {

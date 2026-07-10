@@ -34,7 +34,7 @@ export function App() {
   const [history, setHistory] = useState<QuotaHistoryPoint[]>(() => readHistory());
   const [appSettings, setAppSettingsState] = useState<AppSettings>(() => readAppSettings());
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(() => readUpdateStatus());
-  const launchUpdateCheckStarted = useRef(false);
+  const updateCheckInFlight = useRef<Promise<UpdateStatus> | null>(null);
   const [openAtLoginLoaded, setOpenAtLoginLoaded] = useState(false);
 
   useEffect(() => {
@@ -58,20 +58,30 @@ export function App() {
 
   useEffect(() => {
     const pollingSettings = pickPollingSettings(appSettings);
-    void window.codexBar?.setPollingSettings(pollingSettings);
+    void window.codexBar?.setPollingSettings(pollingSettings).catch(() => undefined);
     window.codexBar?.setVisualSize(appSettings.visualSize);
-    window.codexBar?.setBarPositioning(appSettings.positionAdjustment, appSettings.barX);
+    window.codexBar?.setBarPositioning(
+      appSettings.positionAdjustment,
+      appSettings.barX,
+      appSettings.barDisplayId
+    );
   }, [appSettings]);
 
   useEffect(() => {
-    void window.codexBar?.getOpenAtLogin().then((openAtLogin) => {
+    const bridge = window.codexBar;
+    if (!bridge) {
+      setOpenAtLoginLoaded(true);
+      return;
+    }
+
+    void bridge.getOpenAtLogin().then((openAtLogin) => {
       setAppSettingsState((current) => {
         const next = normalizeAppSettings({ ...current, openAtLogin });
         writeAppSettings(next);
         return next;
       });
       setOpenAtLoginLoaded(true);
-    });
+    }).catch(() => setOpenAtLoginLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -89,17 +99,8 @@ export function App() {
         writeAppSettings(next);
         return next;
       });
-    });
+    }).catch(() => undefined);
   }, [appSettings.openAtLogin, openAtLoginLoaded]);
-
-  useEffect(() => {
-    if (launchUpdateCheckStarted.current) {
-      return;
-    }
-
-    launchUpdateCheckStarted.current = true;
-    void checkForUpdates();
-  }, []);
 
   useEffect(() => {
     if (!appSettings.autoUpdateCheck) {
@@ -121,7 +122,22 @@ export function App() {
     writeAppSettings(normalized);
   }
 
-  async function checkForUpdates(): Promise<UpdateStatus> {
+  function checkForUpdates(): Promise<UpdateStatus> {
+    if (updateCheckInFlight.current) {
+      return updateCheckInFlight.current;
+    }
+
+    const request = performUpdateCheck();
+    updateCheckInFlight.current = request;
+    void request.finally(() => {
+      if (updateCheckInFlight.current === request) {
+        updateCheckInFlight.current = null;
+      }
+    });
+    return request;
+  }
+
+  async function performUpdateCheck(): Promise<UpdateStatus> {
     setUpdateStatus((current) => ({ ...current, checking: true, error: null }));
 
     try {
@@ -137,7 +153,7 @@ export function App() {
         ...initialUpdateStatus,
         latestVersion: updateStatus.latestVersion,
         releaseUrl: updateStatus.releaseUrl,
-        updateAvailable: false,
+        updateAvailable: updateStatus.updateAvailable,
         checking: false,
         downloading: false,
         downloadProgress: null,
@@ -151,6 +167,7 @@ export function App() {
   }
 
   async function upgradeApp(): Promise<UpdateStatus> {
+    let latestKnownStatus = updateStatus;
     setUpdateStatus((current) => ({
       ...current,
       checking: true,
@@ -160,10 +177,8 @@ export function App() {
     }));
 
     try {
-      const checked = await window.codexBar?.checkForUpdates();
-      if (!checked) {
-        throw new Error("更新检查接口不可用。");
-      }
+      const checked = await checkForUpdates();
+      latestKnownStatus = checked;
 
       setUpdateStatus(checked);
       writeUpdateStatus(checked);
@@ -200,9 +215,9 @@ export function App() {
     } catch (error) {
       const next: UpdateStatus = {
         ...initialUpdateStatus,
-        latestVersion: updateStatus.latestVersion,
-        releaseUrl: updateStatus.releaseUrl,
-        updateAvailable: false,
+        latestVersion: latestKnownStatus.latestVersion,
+        releaseUrl: latestKnownStatus.releaseUrl,
+        updateAvailable: latestKnownStatus.updateAvailable,
         checking: false,
         downloading: false,
         downloadProgress: null,
@@ -222,7 +237,6 @@ export function App() {
       appSettings={appSettings}
       updateStatus={updateStatus}
       onAppSettingsChange={setAppSettings}
-      onCheckForUpdates={checkForUpdates}
       onUpgrade={upgradeApp}
     />
   );

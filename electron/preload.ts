@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppDiagnostics,
+  BarPosition,
+  PanelLayout,
   PollingSettings,
   QuotaUpdatePayload,
   UpdateDownloadProgress,
@@ -14,8 +16,8 @@ contextBridge.exposeInMainWorld("codexBar", {
     ipcRenderer.on("quota:update", listener);
     return () => ipcRenderer.off("quota:update", listener);
   },
-  setPanelExpanded(expanded: boolean) {
-    ipcRenderer.send("panel:set-expanded", expanded);
+  setPanelLayout(layout: PanelLayout) {
+    ipcRenderer.send("panel:set-layout", layout);
   },
   setBarCollapsed(collapsed: boolean) {
     ipcRenderer.send("bar:set-collapsed", collapsed);
@@ -23,8 +25,8 @@ contextBridge.exposeInMainWorld("codexBar", {
   setMousePassthrough(passthrough: boolean) {
     ipcRenderer.send("bar:set-mouse-passthrough", passthrough);
   },
-  setBarPositioning(enabled: boolean, x: number | null) {
-    ipcRenderer.send("bar:set-positioning", { enabled, x });
+  setBarPositioning(enabled: boolean, x: number | null, displayId: number | null) {
+    ipcRenderer.send("bar:set-positioning", { enabled, x, displayId });
   },
   startBarDrag(screenX: number, screenY: number) {
     ipcRenderer.send("bar:drag-start", { screenX, screenY });
@@ -33,7 +35,7 @@ contextBridge.exposeInMainWorld("codexBar", {
     ipcRenderer.send("bar:drag-move", { screenX, screenY });
   },
   endBarDrag() {
-    return ipcRenderer.invoke("bar:drag-end") as Promise<number | null>;
+    return ipcRenderer.invoke("bar:drag-end") as Promise<BarPosition | null>;
   },
   quitApp() {
     ipcRenderer.send("app:quit");
@@ -66,8 +68,5 @@ contextBridge.exposeInMainWorld("codexBar", {
     const listener = (_event: Electron.IpcRendererEvent, progress: UpdateDownloadProgress) => callback(progress);
     ipcRenderer.on("updates:download-progress", listener);
     return () => ipcRenderer.off("updates:download-progress", listener);
-  },
-  openExternal(url: string) {
-    ipcRenderer.send("app:open-external", url);
   }
 });

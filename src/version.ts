@@ -1,3 +1,4 @@
-export const APP_VERSION = "1.0.2";
+import packageJson from "../package.json";
+
+export const APP_VERSION = packageJson.version;
 export const RELEASES_URL = "https://github.com/Aecenas/CodexBar/releases";
-export const LATEST_RELEASE_API_URL = "https://api.github.com/repos/Aecenas/CodexBar/releases/latest";

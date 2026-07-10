@@ -3,6 +3,7 @@ import type { AppDiagnostics, AppSettings, UpdateStatus, VisualSize } from "../t
 import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_POLLING_SETTINGS,
+  MAX_POLLING_SETTINGS,
   MIN_POLLING_SETTINGS,
   normalizeAppSettings
 } from "../pollingSettings";
@@ -11,7 +12,6 @@ interface SettingsHoverPanelProps {
   settings: AppSettings;
   updateStatus: UpdateStatus;
   onChange: (settings: AppSettings) => void;
-  onCheckForUpdates: () => Promise<UpdateStatus>;
   onUpgrade: () => Promise<UpdateStatus>;
   onPointerEnter: () => void;
   onPointerLeave: () => void;
@@ -29,21 +29,21 @@ const SETTINGS_ROWS: Array<{
   {
     key: "activityCheckSeconds",
     label: "状态检查",
-    description: "检查 Codex app 是否有线程正在活跃的时间间隔。",
+    description: "检查本机 Codex session 是否正在写入的时间间隔。",
     unit: "秒",
     displayDivisor: 1
   },
   {
     key: "busyQuotaSeconds",
     label: "活跃时轮询间隔",
-    description: "有活跃线程时，读取 Codex 额度数据的时间间隔。",
+    description: "检测到 Codex session 写入活动时，读取额度数据的时间间隔。",
     unit: "秒",
     displayDivisor: 1
   },
   {
     key: "idleQuotaSeconds",
     label: "空闲时轮询间隔",
-    description: "没有活跃线程时，读取 Codex 额度数据的时间间隔。",
+    description: "未检测到 Codex session 写入活动时，读取额度数据的时间间隔。",
     unit: "分钟",
     displayDivisor: 60
   }
@@ -55,11 +55,16 @@ const VISUAL_SIZE_OPTIONS: Array<{ value: VisualSize; label: string }> = [
   { value: "large", label: "大" }
 ];
 
+const PANEL_METRICS: Record<VisualSize, { barWidth: number; panelTop: number; panelScale: number }> = {
+  small: { barWidth: 576, panelTop: 75, panelScale: 0.86 },
+  medium: { barWidth: 672, panelTop: 86, panelScale: 1 },
+  large: { barWidth: 768, panelTop: 97, panelScale: 1.14 }
+};
+
 export function SettingsHoverPanel({
   settings,
   updateStatus,
   onChange,
-  onCheckForUpdates,
   onUpgrade,
   onPointerEnter,
   onPointerLeave
@@ -71,6 +76,15 @@ export function SettingsHoverPanel({
   const [toolsOpen, setToolsOpen] = useState(false);
   const [diagnostics, setDiagnostics] = useState<AppDiagnostics | null>(null);
   const [downloadProxyDraft, setDownloadProxyDraft] = useState(settings.downloadProxyPrefix);
+  const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const panelMetrics = PANEL_METRICS[settings.visualSize];
+  const expectedWidth = Math.ceil(panelMetrics.barWidth + 230 * panelMetrics.panelScale);
+  const expectedHeight = Math.ceil(panelMetrics.panelTop + 500 * panelMetrics.panelScale + 32);
+  const viewportConstrained = viewport.width < expectedWidth || viewport.height < expectedHeight;
+  const constrainedPanelHeight = Math.max(
+    260,
+    Math.min(500, Math.floor((viewport.height - panelMetrics.panelTop - 8) / panelMetrics.panelScale))
+  );
 
   useEffect(() => {
     setDraftValues(createDraftValues(settings));
@@ -81,7 +95,9 @@ export function SettingsHoverPanel({
   }, [settings.downloadProxyPrefix]);
 
   useEffect(() => {
-    void onCheckForUpdates();
+    const updateViewport = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
   }, []);
 
   useEffect(() => {
@@ -107,9 +123,10 @@ export function SettingsHoverPanel({
   function commitInterval(key: IntervalSettingKey, draftValue: string, displayDivisor: number): void {
     const displayValue = Number(draftValue);
     const min = MIN_POLLING_SETTINGS[key] / displayDivisor;
+    const max = MAX_POLLING_SETTINGS[key] / displayDivisor;
     const nextValue =
       Number.isFinite(displayValue) && displayValue >= min
-        ? Math.round(displayValue * displayDivisor)
+        ? Math.min(MAX_POLLING_SETTINGS[key], Math.round(Math.min(max, displayValue) * displayDivisor))
         : DEFAULT_POLLING_SETTINGS[key];
 
     const next = normalizeAppSettings({
@@ -146,8 +163,7 @@ export function SettingsHoverPanel({
     onChange(
       normalizeAppSettings({
         ...settings,
-        positionAdjustment,
-        barX: positionAdjustment ? settings.barX : null
+        positionAdjustment
       })
     );
   }
@@ -172,16 +188,25 @@ export function SettingsHoverPanel({
   }
 
   async function refreshDiagnostics(): Promise<void> {
-    setDiagnostics((await window.codexBar?.getDiagnostics()) ?? null);
+    try {
+      setDiagnostics((await window.codexBar?.getDiagnostics()) ?? null);
+    } catch {
+      setDiagnostics(null);
+    }
   }
 
   return (
     <aside
-      className="settings-panel"
+      className={`settings-panel ${viewportConstrained ? "is-viewport-constrained" : ""}`}
+      style={viewportConstrained ? { height: constrainedPanelHeight } : undefined}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
-      onMouseEnter={onPointerEnter}
-      onMouseLeave={onPointerLeave}
+      onFocus={onPointerEnter}
+      onBlur={(event) => {
+        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+          onPointerLeave();
+        }
+      }}
       aria-label="CodexBar settings"
     >
       <div className="settings-panel-header">
@@ -193,6 +218,7 @@ export function SettingsHoverPanel({
       <div className="settings-panel-list">
         {SETTINGS_ROWS.map((row) => {
           const min = MIN_POLLING_SETTINGS[row.key] / row.displayDivisor;
+          const max = MAX_POLLING_SETTINGS[row.key] / row.displayDivisor;
           const defaultValue = DEFAULT_POLLING_SETTINGS[row.key] / row.displayDivisor;
 
           return (
@@ -208,6 +234,7 @@ export function SettingsHoverPanel({
                 <small>
                   默认 {formatNumber(defaultValue)}
                   {row.unit} / 下限 {formatNumber(min)}
+                  {row.unit} / 上限 {formatNumber(max)}
                   {row.unit}
                 </small>
               </span>
@@ -314,11 +341,23 @@ export function SettingsHoverPanel({
           void refreshDiagnostics();
         }}
         onPointerLeave={() => setToolsOpen(false)}
-        onMouseEnter={() => {
+        onFocus={() => {
           setToolsOpen(true);
           void refreshDiagnostics();
         }}
-        onMouseLeave={() => setToolsOpen(false)}
+        onBlur={(event) => {
+          if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+            setToolsOpen(false);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            setToolsOpen((current) => !current);
+            void refreshDiagnostics();
+          }
+        }}
+        tabIndex={0}
       >
         <span className="settings-row-title">
           <strong>代理与诊断</strong>
@@ -346,12 +385,12 @@ export function SettingsHoverPanel({
                   <span
                     className="settings-info"
                     tabIndex={0}
-                    aria-label="填写一个会把后面的完整 GitHub 下载地址作为路径继续转发的代理前缀，例如 https://gh-proxy.example.com/。留空表示直接下载。"
+                    aria-label="填写一个 HTTPS 代理前缀；安装包仍会使用 GitHub 提供的 SHA-256 摘要校验。留空表示直接下载。"
                   >
                     i
                     <span className="settings-tooltip settings-tools-tooltip">
-                      填写一个会把后面的完整 GitHub 下载地址作为路径继续转发的代理前缀，例如
-                      https://gh-proxy.example.com/。留空表示直接下载。
+                      填写一个会把完整 GitHub 下载地址继续转发的 HTTPS 前缀，例如
+                      https://gh-proxy.example.com/。安装包校验通过后才会执行；留空表示直接下载。
                     </span>
                   </span>
                 </span>
@@ -379,7 +418,7 @@ export function SettingsHoverPanel({
             </div>
             <div className="settings-diagnostics-body settings-tools-diagnostics">
               <span>
-                <strong>线程</strong>
+                <strong>活动</strong>
                 <em>{formatActivityDiagnostics(diagnostics)}</em>
               </span>
               <span>

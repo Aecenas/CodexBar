@@ -13,7 +13,7 @@ export interface RateLimitSnapshot {
   limitId: string;
   planType: string | null;
   fiveHour: RateLimitWindow;
-  week: RateLimitWindow;
+  week: RateLimitWindow | null;
   resetCredits: number | null;
   fetchedAt: number;
 }
@@ -57,11 +57,22 @@ export interface PollingSettings {
 
 export type VisualSize = "small" | "medium" | "large";
 
+export type PanelMode = "none" | "fiveHour" | "week" | "settings" | "context";
+
+export interface PanelLayout {
+  mode: PanelMode;
+  contextRect?: { x: number; y: number; width: number; height: number };
+}
+
+export interface BarPosition {
+  x: number;
+  displayId: number;
+}
+
 export interface ActivityDiagnostics {
   sessionsDir: string;
   lastProbeAt: number | null;
   lastSource: string;
-  lastThreadStatus: string | null;
   lastNewestSessionWriteAt: number | null;
   lastSessionActivityAt: number | null;
 }

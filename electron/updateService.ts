@@ -1,11 +1,19 @@
 import { app, net, shell, type WebContents } from "electron";
+import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, unlink } from "node:fs/promises";
+import { mkdir, rename, unlink } from "node:fs/promises";
 import path from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { UpdateDownloadProgress, UpdateStatus } from "./types.js";
+import {
+  getAssetSha256,
+  isCodexBarInstallerName,
+  normalizeDownloadProxyPrefix,
+  type ReleaseAssetMetadata
+} from "./updateValidation.js";
 
-interface GitHubAsset {
-  name: string;
+interface GitHubAsset extends ReleaseAssetMetadata {
   browser_download_url: string;
   size?: number;
 }
@@ -18,6 +26,8 @@ interface GitHubLatestRelease {
 
 const latestReleaseApiUrl = "https://api.github.com/repos/Aecenas/CodexBar/releases/latest";
 const releasesUrl = "https://github.com/Aecenas/CodexBar/releases";
+const RELEASE_REQUEST_TIMEOUT_MS = 30_000;
+const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 
 export async function checkForUpdate(): Promise<UpdateStatus> {
   const release = await requestJson<GitHubLatestRelease>(latestReleaseApiUrl);
@@ -41,13 +51,31 @@ export async function downloadAndInstallUpdate(webContents: WebContents, downloa
   await mkdir(updateDir, { recursive: true });
 
   const installerPath = path.join(updateDir, sanitizeFileName(installer.name));
+  const partialPath = `${installerPath}.${process.pid}.part`;
+  const expectedSha256 = getAssetSha256(installer);
+  await unlink(partialPath).catch(() => undefined);
 
   try {
-    await downloadFile(applyDownloadProxy(installer.browser_download_url, downloadProxyPrefix), installerPath, (progress) => {
-      webContents.send("updates:download-progress", progress);
-    });
-  } catch (error) {
+    const downloaded = await downloadFile(
+      applyDownloadProxy(installer.browser_download_url, downloadProxyPrefix),
+      partialPath,
+      (progress) => {
+        if (!webContents.isDestroyed()) {
+          webContents.send("updates:download-progress", progress);
+        }
+      }
+    );
+    if (downloaded.sha256 !== expectedSha256) {
+      throw new Error("安装包 SHA-256 校验失败，已拒绝执行。");
+    }
+    if (typeof installer.size === "number" && installer.size > 0 && downloaded.receivedBytes !== installer.size) {
+      throw new Error("安装包大小与 GitHub Release 元数据不一致，已拒绝执行。");
+    }
+
     await unlink(installerPath).catch(() => undefined);
+    await rename(partialPath, installerPath);
+  } catch (error) {
+    await unlink(partialPath).catch(() => undefined);
     throw error;
   }
 
@@ -64,30 +92,12 @@ export async function downloadAndInstallUpdate(webContents: WebContents, downloa
 }
 
 function applyDownloadProxy(url: string, proxyPrefix: string): string {
-  const prefix = normalizeProxyPrefix(proxyPrefix);
+  const prefix = normalizeDownloadProxyPrefix(proxyPrefix);
   if (!prefix) {
     return url;
   }
 
   return `${prefix}${url}`;
-}
-
-function normalizeProxyPrefix(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return "";
-    }
-
-    return url.toString().endsWith("/") ? url.toString() : `${url.toString()}/`;
-  } catch {
-    return "";
-  }
 }
 
 function releaseToStatus(release: GitHubLatestRelease): UpdateStatus {
@@ -114,80 +124,94 @@ function findInstallerAsset(release: GitHubLatestRelease): GitHubAsset | null {
   return (
     release.assets?.find((asset) => {
       const name = asset.name.toLowerCase();
-      return name.endsWith(".exe") && !name.includes("uninstaller");
+      return isCodexBarInstallerName(name);
     }) ?? null
   );
 }
 
 async function requestJson<T>(url: string): Promise<T> {
-  const response = await net.fetch(url, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "CodexBar"
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RELEASE_REQUEST_TIMEOUT_MS);
+  try {
+    const response = await net.fetch(url, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "CodexBar"
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitHub release check failed: ${response.status}`);
     }
-  });
 
-  if (!response.ok) {
-    throw new Error(`GitHub release check failed: ${response.status}`);
+    return (await response.json()) as T;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("GitHub release check timed out.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
-
-  return (await response.json()) as T;
 }
 
 async function downloadFile(
   url: string,
   destination: string,
   onProgress: (progress: UpdateDownloadProgress) => void
-): Promise<void> {
-  const response = await net.fetch(url, {
-    headers: {
-      "User-Agent": "CodexBar"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`下载安装包失败: ${response.status}`);
-  }
-
-  if (!response.body) {
-    throw new Error("下载安装包失败: 响应内容为空。");
-  }
-
-  const totalBytes = Number.parseInt(response.headers.get("content-length") ?? "", 10);
-  const safeTotalBytes = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : null;
-  let receivedBytes = 0;
-  const file = createWriteStream(destination);
-  const reader = response.body.getReader();
-
+): Promise<{ receivedBytes: number; sha256: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
+    const response = await net.fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "CodexBar"
       }
+    });
 
-      receivedBytes += value.byteLength;
-      if (!file.write(Buffer.from(value))) {
-        await new Promise<void>((resolve, reject) => {
-          file.once("drain", resolve);
-          file.once("error", reject);
-        });
-      }
-
-      onProgress({
-        receivedBytes,
-        totalBytes: safeTotalBytes,
-        percent: safeTotalBytes === null ? null : Math.min(100, Math.round((receivedBytes / safeTotalBytes) * 100))
-      });
+    if (!response.ok) {
+      throw new Error(`下载安装包失败: ${response.status}`);
     }
-  } finally {
-    reader.releaseLock();
-  }
 
-  await new Promise<void>((resolve, reject) => {
-    file.end(() => resolve());
-    file.once("error", reject);
-  });
+    if (!response.body) {
+      throw new Error("下载安装包失败: 响应内容为空。");
+    }
+
+    const totalBytes = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+    const safeTotalBytes = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : null;
+    const hash = createHash("sha256");
+    let receivedBytes = 0;
+    const progress = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        receivedBytes += bytes.length;
+        hash.update(bytes);
+        onProgress({
+          receivedBytes,
+          totalBytes: safeTotalBytes,
+          percent: safeTotalBytes === null ? null : Math.min(100, Math.round((receivedBytes / safeTotalBytes) * 100))
+        });
+        callback(null, bytes);
+      }
+    });
+    const source = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
+    await pipeline(source, progress, createWriteStream(destination), { signal: controller.signal });
+
+    if (safeTotalBytes !== null && receivedBytes !== safeTotalBytes) {
+      throw new Error("下载安装包失败: 下载内容长度不完整。");
+    }
+
+    return { receivedBytes, sha256: hash.digest("hex") };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("下载安装包超时，已取消。");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function isNewerVersion(latest: string, current: string): boolean {
